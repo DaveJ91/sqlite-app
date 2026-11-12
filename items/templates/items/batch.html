@@ -1,0 +1,52 @@
+{% extends "items/base.html" %}
+{% block title %}Review extraction{% endblock %}
+{% block body %}
+  <h1>{{ batch.period_label|default:"Batch" }} {{ batch.pk }}</h1>
+  <p class="muted">{{ batch.get_status_display }}. Check the extracted lines, edit any cell, then accept.</p>
+  {% for invoice in batch.invoices.all %}
+    {% if invoice.error %}
+      <p class="error">{{ invoice.original_name }}: {{ invoice.error }}</p>
+    {% else %}
+      <p class="muted">{{ invoice.original_name }} read by {{ invoice.read_source }}.</p>
+    {% endif %}
+  {% endfor %}
+  <form method="post">
+    {% csrf_token %}
+    {{ formset.management_form }}
+    <table>
+      <thead>
+        <tr>
+          <th>File</th><th>Supplier</th><th>Number</th><th>Date</th><th>Currency</th>
+          <th>Description</th><th>Net</th><th>VAT</th><th>Gross</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for form in formset %}
+        <tr>
+          <td>{{ form.id }}{{ form.instance.invoice.original_name }}</td>
+          <td>{{ form.supplier }}</td>
+          <td>{{ form.invoice_number }}</td>
+          <td>{{ form.invoice_date }}</td>
+          <td>{{ form.currency }}</td>
+          <td>{{ form.description }}</td>
+          <td>{{ form.net_amount }}</td>
+          <td>{{ form.vat_amount }}</td>
+          <td>{{ form.gross_amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if batch.status == "extracted" %}
+    <div class="actions">
+      <button type="submit" name="action" value="save">Save edits</button>
+      {% if blocked %}
+        <span class="error">Accept is unavailable until every invoice has been read.</span>
+      {% else %}
+        <button type="submit" name="action" value="accept">Accept</button>
+      {% endif %}
+    </div>
+    {% else %}
+    <p><a href="{% url 'batch_vat' batch.pk %}">Review VAT classification</a></p>
+    {% endif %}
+  </form>
+{% endblock %}

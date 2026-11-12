@@ -1,9 +1,19 @@
 from django.contrib import admin
 
-from .models import Invoice
+from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatReturn
 
 
-@admin.register(Invoice)
-class InvoiceAdmin(admin.ModelAdmin):
-    list_display = ("original_name", "created", "error")
-    search_fields = ("original_name", "extracted_text")
+class InvoiceInline(admin.TabularInline):
+    model = Invoice
+    extra = 0
+
+
+@admin.register(Batch)
+class BatchAdmin(admin.ModelAdmin):
+    list_display = ("id", "period_label", "status", "created")
+    inlines = [InvoiceInline]
+
+
+admin.site.register(InvoiceLine)
+admin.site.register(AuditEvent)
+admin.site.register(VatReturn)

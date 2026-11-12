@@ -129,6 +129,14 @@ STATIC_URL = "static/"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
+CONTENT_UNDERSTANDING_BASE_URL = os.environ.get("CONTENT_UNDERSTANDING_BASE_URL", "")
+CONTENT_UNDERSTANDING_ENDPOINT = os.environ.get("CONTENT_UNDERSTANDING_ENDPOINT", "")
+VAT_CLASSIFICATION_BASE_URL = os.environ.get("VAT_CLASSIFICATION_BASE_URL", "")
+VAT_CLASSIFICATION_ENDPOINT = os.environ.get("VAT_CLASSIFICATION_ENDPOINT", "")
+VAT_LOW_CONFIDENCE = os.environ.get("VAT_LOW_CONFIDENCE", "0.7")
+GROK_MODEL = os.environ.get("GROK_MODEL", "grok-4.7")
+
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration

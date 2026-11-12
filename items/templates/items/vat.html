@@ -1,0 +1,43 @@
+{% extends "items/base.html" %}
+{% block title %}Review VAT{% endblock %}
+{% block body %}
+  <h1>VAT classification</h1>
+  <p class="muted">Low-confidence rows are highlighted. Change the category if it is wrong, then accept.</p>
+  <p><a href="{% url 'batch_detail' batch.pk %}">Extracted lines</a></p>
+  <form method="post">
+    {% csrf_token %}
+    {{ formset.management_form }}
+    <table>
+      <thead>
+        <tr>
+          <th>File</th><th>Description</th><th>Net</th><th>VAT</th><th>Category</th><th>Confidence</th><th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for form, line in rows %}
+        <tr class="{% if line.low_confidence %}flag{% endif %}">
+          <td>{{ form.id }}{{ line.invoice.original_name }}</td>
+          <td>{{ line.description }}</td>
+          <td>{{ line.net_amount }}</td>
+          <td>{{ line.vat_amount }}</td>
+          <td>{{ form.category }}{% if line.low_confidence %}<div>Low confidence</div>{% endif %}{% if line.classification_error %}<div class="error">{{ line.classification_error }}</div>{% endif %}</td>
+          <td>{% if line.confidence is not None %}{{ line.confidence }}{% endif %}</td>
+          <td>{{ line.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if batch.status == "classified" %}
+    <div class="actions">
+      <button type="submit" name="action" value="save">Save categories</button>
+      {% if missing_category %}
+        <span class="error">Choose a category for every line before accepting.</span>
+      {% else %}
+        <button type="submit" name="action" value="accept">Accept</button>
+      {% endif %}
+    </div>
+    {% elif batch.status == "return_ready" %}
+    <p><a href="{% url 'batch_return' batch.pk %}">Open the VAT return</a></p>
+    {% endif %}
+  </form>
+{% endblock %}

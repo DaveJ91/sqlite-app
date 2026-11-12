@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Invoices{% endblock %}</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; line-height: 1.4; }
+    h1 { font-size: 1.4rem; }
+    input, select, button, textarea { font: inherit; }
+    input, select, textarea { width: 100%; box-sizing: border-box; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; vertical-align: top; border-top: 1px solid #8884; padding: 0.4rem; }
+    .muted { color: #888; font-size: 0.85rem; }
+    .error { color: #b00020; }
+    tr.flag { background: #fff3c4; color: #1a1a1a; }
+    a { color: inherit; }
+    form.inline { display: inline; }
+    .actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
+  </style>
+</head>
+<body>
+  <p><a href="{% url 'batch_list' %}">Batches</a></p>
+  {% if messages %}
+    {% for message in messages %}<p class="error">{{ message }}</p>{% endfor %}
+  {% endif %}
+  {% block body %}{% endblock %}
+</body>
+</html>

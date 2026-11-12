@@ -1,50 +1,30 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Invoices</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 44rem; padding: 0 1rem; line-height: 1.4; }
-    h1 { font-size: 1.4rem; }
-    input, button { font: inherit; }
-    .error { color: #b00020; }
-    ul { list-style: none; padding: 0; }
-    li { border-top: 1px solid #8884; padding: 0.8rem 0; }
-    .row { display: flex; justify-content: space-between; gap: 1rem; }
-    .muted { color: #888; font-size: 0.85rem; }
-    a { color: inherit; }
-  </style>
-</head>
-<body>
-  <h1>Invoices</h1>
-  <p class="muted">Upload a PDF. Irish VAT is classified per line. This is not a VAT return.</p>
+{% extends "items/base.html" %}
+{% block title %}Invoices{% endblock %}
+{% block body %}
+  <h1>Invoice batches</h1>
+  <p class="muted">Upload a folder of up to 10 PDFs. If no content-understanding URL is set, Grok reads the invoices.</p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
-    {{ form.file }}
-    <button type="submit">Classify</button>
-    {% if form.file.errors %}
-      <p class="error">{{ form.file.errors|join:", " }}</p>
-    {% endif %}
+    <p>{{ form.period_label }}</p>
+    <p>
+      <label>Folder <input type="file" name="files" webkitdirectory directory multiple></label>
+    </p>
+    <p>
+      <label>Or choose files <input type="file" name="files" accept="application/pdf,.pdf" multiple></label>
+    </p>
+    <button type="submit">Read invoices</button>
+    {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
   </form>
-  {% if invoices %}
+  {% if batches %}
   <ul>
-    {% for invoice in invoices %}
+    {% for batch in batches %}
     <li>
-      <div class="row">
-        <a href="{% url 'invoice_detail' invoice.pk %}">{{ invoice.supplier|default:invoice.original_name }}</a>
-        <span class="muted">{{ invoice.created|date:"Y-m-d H:i" }}</span>
-      </div>
-      <div class="muted">
-        {{ invoice.original_name }}
-        {% if invoice.error %} · {{ invoice.error }}{% endif %}
-      </div>
+      <a href="{% url 'batch_detail' batch.pk %}">{{ batch.period_label|default:"Batch" }} {{ batch.pk }}</a>
+      <span class="muted">{{ batch.get_status_display }} · {{ batch.created|date:"Y-m-d H:i" }}</span>
     </li>
     {% endfor %}
   </ul>
   {% else %}
-  <p class="muted">No invoices yet.</p>
+  <p class="muted">No batches yet.</p>
   {% endif %}
-</body>
-</html>
+{% endblock %}
