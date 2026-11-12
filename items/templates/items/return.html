@@ -1,38 +1,41 @@
 {% extends "items/base.html" %}
 {% block title %}VAT return{% endblock %}
+{% block heading %}VAT return workings{% endblock %}
 {% block body %}
-  <h1>VAT return workings</h1>
-  <p class="muted">{{ batch.period_label }} · Working paper, not a filing.</p>
-  <p>
-    <a href="{% url 'batch_detail' batch.pk %}">Extracted lines</a>
-    · <a href="{% url 'batch_vat' batch.pk %}">VAT review</a>
-  </p>
+  <p class="lede">Every total opens back to the lines that produced it. This is a working paper, not a filing.</p>
   {% for section in sections %}
-  <h2>{{ section.label }}</h2>
-  <p>Net {{ section.net }} · VAT {{ section.vat }} · Gross {{ section.gross }}</p>
-  <table>
-    <thead>
-      <tr><th>File</th><th>Description</th><th>Net</th><th>VAT</th><th>Gross</th><th>Confidence</th><th>Reason</th></tr>
-    </thead>
-    <tbody>
-      {% for line in section.lines %}
-      <tr>
-        <td>{{ line.filename }}</td>
-        <td>{{ line.description }}</td>
-        <td>{{ line.net }}</td>
-        <td>{{ line.vat }}</td>
-        <td>{{ line.gross }}</td>
-        <td>{{ line.confidence }}</td>
-        <td>{{ line.reason }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <section class="card" style="margin-bottom: 1rem;">
+    <h2>{{ section.label }}</h2>
+    <p class="num">Net {{ section.net }} · VAT {{ section.vat }} · Gross {{ section.gross }}</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>File</th><th>Description</th><th>Net</th><th>VAT</th><th>Gross</th><th>Confidence</th><th>Reason</th></tr>
+        </thead>
+        <tbody>
+          {% for line in section.lines %}
+          <tr>
+            <td>{{ line.filename }}</td>
+            <td>{{ line.description }}</td>
+            <td class="num">{{ line.net }}</td>
+            <td class="num">{{ line.vat }}</td>
+            <td class="num">{{ line.gross }}</td>
+            <td class="num">{{ line.confidence }}</td>
+            <td>{{ line.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
   {% endfor %}
   <h2>Audit trail</h2>
-  <ul>
+  <ul class="batch-list">
     {% for event in events %}
-    <li><span class="muted">{{ event.created|date:"Y-m-d H:i:s" }}</span> {{ event.kind }} <span class="muted">{{ event.payload }}</span></li>
+    <li>
+      <span>{{ event.kind }}</span>
+      <span class="muted">{{ event.created|date:"Y-m-d H:i:s" }} · {{ event.payload }}</span>
+    </li>
     {% endfor %}
   </ul>
 {% endblock %}

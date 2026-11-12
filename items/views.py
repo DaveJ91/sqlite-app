@@ -7,12 +7,17 @@ from .httpapi import ClientError
 
 from .forms import ClassificationFormSet, LineFormSet, UploadForm
 from .graph import run_step
+from .mocks import seed_mock_batch
 from .models import AuditEvent, Batch, Invoice, InvoiceLine
+from .plan import workspace_plan
 from .vat import RATES
 
 
 def batch_list(request):
     form = UploadForm()
+    if request.method == "POST" and request.POST.get("action") == "mock_batch":
+        batch = seed_mock_batch(request.POST.get("period_label", ""))
+        return redirect("batch_detail", pk=batch.pk)
     if request.method == "POST":
         form = UploadForm(request.POST, request.FILES)
         if form.is_valid():
@@ -22,7 +27,11 @@ def batch_list(request):
                 Invoice.objects.create(batch=batch, file=upload, original_name=upload.name)
             run_step(batch.id, "extract", mock=request.POST.get("action") == "mock")
             return redirect("batch_detail", pk=batch.pk)
-    return render(request, "items/list.html", {"batches": Batch.objects.all(), "form": form})
+    return render(
+        request,
+        "items/list.html",
+        {"batches": Batch.objects.all(), "form": form, "plan": workspace_plan(None), "batch": None},
+    )
 
 
 def batch_detail(request, pk):
@@ -56,7 +65,7 @@ def batch_detail(request, pk):
     return render(
         request,
         "items/batch.html",
-        {"batch": batch, "formset": formset, "blocked": blocked},
+        {"batch": batch, "formset": formset, "blocked": blocked, "plan": workspace_plan(batch)},
     )
 
 
@@ -91,6 +100,7 @@ def batch_vat(request, pk):
             "formset": formset,
             "rows": list(zip(formset.forms, lines)),
             "missing_category": missing,
+            "plan": workspace_plan(batch),
         },
     )
 
@@ -111,6 +121,7 @@ def batch_return(request, pk):
             "batch": batch,
             "sections": sections,
             "events": batch.events.all(),
+            "plan": workspace_plan(batch),
         },
     )
 

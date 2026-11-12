@@ -3,28 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Invoices{% endblock %}</title>
+  <title>{% block title %}VAT desk{% endblock %}</title>
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; line-height: 1.4; }
-    h1 { font-size: 1.4rem; }
-    input, select, button, textarea { font: inherit; }
-    input, select, textarea { width: 100%; box-sizing: border-box; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; vertical-align: top; border-top: 1px solid #8884; padding: 0.4rem; }
-    .muted { color: #888; font-size: 0.85rem; }
-    .error { color: #b00020; }
-    tr.flag { background: #fff3c4; color: #1a1a1a; }
+    :root {
+      color-scheme: light;
+      --bg: #f3efe6;
+      --ink: #1c1917;
+      --muted: #78716c;
+      --line: #e7e0d4;
+      --card: #fffcf7;
+      --teal: #0f766e;
+      --teal-soft: #ccfbf1;
+      --amber: #fef3c7;
+      --amber-ink: #92400e;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
     a { color: inherit; }
-    form.inline { display: inline; }
-    .actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
+    .shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+    .plan {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.5rem 1.25rem;
+      background: #fffdf8;
+      border-right: 1px solid var(--line);
+      overflow: auto;
+    }
+    .brand { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 1.35rem; letter-spacing: -0.03em; }
+    .brand a { text-decoration: none; }
+    .eyebrow { margin: 0.2rem 0 1.2rem; color: var(--muted); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .batch-name { margin: 0 0 1rem; font-size: 0.92rem; }
+    .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+    .step { display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.55rem; padding: 0.7rem 0.65rem; border-radius: 12px; }
+    .step.current { background: #fff; border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(28, 25, 23, 0.05); }
+    .step.todo { opacity: 0.55; }
+    .mark {
+      width: 1.35rem; height: 1.35rem; border-radius: 999px;
+      display: grid; place-items: center; font-size: 0.75rem; margin-top: 0.1rem;
+      border: 1px solid var(--line); background: #fff;
+    }
+    .step.done .mark { background: var(--teal); color: white; border-color: var(--teal); }
+    .step.current .mark { background: var(--ink); color: white; border-color: var(--ink); }
+    .step-title { font-weight: 600; font-size: 0.92rem; text-decoration: none; }
+    .step-detail { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
+    main { padding: 1.75rem 2rem 3rem; max-width: 1180px; }
+    .kicker { margin: 0; color: var(--teal); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+    h1 { font-family: Palatino, "Iowan Old Style", Georgia, serif; font-size: 2.1rem; font-weight: 500; letter-spacing: -0.03em; margin: 0.25rem 0; }
+    .lede { color: var(--muted); max-width: 40rem; margin-top: 0; }
+    .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 1.1rem 1.15rem 1.2rem; box-shadow: 0 10px 30px rgba(28, 25, 23, 0.04); }
+    .card h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
+    button, .button {
+      font: inherit; border-radius: 999px; padding: 0.55rem 0.95rem; cursor: pointer; text-decoration: none;
+      border: 1px solid var(--ink); background: var(--ink); color: white;
+    }
+    button.secondary, .button.secondary { background: white; color: var(--ink); }
+    input[type="text"], input[type="file"], select, textarea {
+      font: inherit; width: 100%; padding: 0.45rem 0.55rem; border-radius: 8px; border: 1px solid var(--line); background: white;
+    }
+    .table-wrap { max-height: calc(100vh - 240px); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: white; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    th, td { text-align: left; vertical-align: middle; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); }
+    th { position: sticky; top: 0; background: #fffdf8; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+    td input, td select { border-color: transparent; background: transparent; padding: 0.3rem 0.35rem; }
+    td input:focus, td select:focus { border-color: #d6d3d1; background: white; outline: 2px solid #ccfbf1; }
+    .num { font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", monospace; font-size: 0.82rem; }
+    tr.flag { background: var(--amber); }
+    tr.flag td { color: #1c1917; }
+    .pill { display: inline-block; border-radius: 999px; padding: 0.1rem 0.45rem; background: var(--amber); color: var(--amber-ink); font-size: 0.72rem; font-weight: 700; }
+    .error { color: var(--danger); }
+    .muted { color: var(--muted); }
+    .batch-list { list-style: none; padding: 0; margin: 1.5rem 0 0; }
+    .batch-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-top: 1px solid var(--line); }
+    .messages { margin: 0 0 1rem; }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .plan { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .grid { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
   </style>
 </head>
 <body>
-  <p><a href="{% url 'batch_list' %}">Batches</a></p>
-  {% if messages %}
-    {% for message in messages %}<p class="error">{{ message }}</p>{% endfor %}
-  {% endif %}
-  {% block body %}{% endblock %}
+  <div class="shell">
+    <aside class="plan">
+      <div class="brand"><a href="{% url 'batch_list' %}">VAT desk</a></div>
+      <p class="eyebrow">Tax workspace</p>
+      {% if batch %}<p class="batch-name">{{ batch.period_label|default:"Batch" }} {{ batch.pk }}</p>{% endif %}
+      <ol class="steps">
+        {% for step in plan.steps %}
+        <li class="step {{ step.state }}">
+          <span class="mark">{% if step.state == "done" %}✓{% elif step.state == "current" %}●{% else %}○{% endif %}</span>
+          <div>
+            {% if step.href %}<a class="step-title" href="{{ step.href }}">{{ step.title }}</a>{% else %}<div class="step-title">{{ step.title }}</div>{% endif %}
+            <div class="step-detail">{{ step.detail }}</div>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </aside>
+    <main>
+      {% if messages %}
+        <div class="messages">{% for message in messages %}<p class="error">{{ message }}</p>{% endfor %}</div>
+      {% endif %}
+      <p class="kicker">{{ plan.kicker }}</p>
+      <h1>{% block heading %}{{ plan.current_title }}{% endblock %}</h1>
+      {% block body %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>

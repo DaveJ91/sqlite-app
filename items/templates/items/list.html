@@ -1,31 +1,45 @@
 {% extends "items/base.html" %}
-{% block title %}Invoices{% endblock %}
+{% block title %}VAT desk{% endblock %}
+{% block heading %}Start a batch{% endblock %}
 {% block body %}
-  <h1>Invoice batches</h1>
-  <p class="muted">Upload a folder of up to 10 PDFs. Read invoices calls the API. Use mock extraction skips that call and fills sample invoice lines.</p>
-  <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <p>{{ form.period_label }}</p>
-    <p>
-      <label>Folder <input type="file" name="files" webkitdirectory directory multiple></label>
-    </p>
-    <p>
-      <label>Or choose files <input type="file" name="files" accept="application/pdf,.pdf" multiple></label>
-    </p>
-    <button type="submit" name="action" value="read">Read invoices</button>
-    <button type="submit" name="action" value="mock">Use mock extraction</button>
-    {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
-  </form>
+  <p class="lede">Work a set of purchase invoices through extraction, VAT classification, and a return working paper. The plan on the left ticks off as you go.</p>
+  <div class="grid">
+    <section class="card">
+      <h2>Mock batch, no files</h2>
+      <p class="muted">Fifty ready-made lines across ten suppliers. Nothing is sent to an API.</p>
+      <form method="post">
+        {% csrf_token %}
+        <p><input type="text" name="period_label" placeholder="Period, for example March 2026"></p>
+        <div class="actions">
+          <button type="submit" name="action" value="mock_batch">Start mock batch</button>
+        </div>
+      </form>
+    </section>
+    <section class="card">
+      <h2>Your own PDFs</h2>
+      <p class="muted">Up to 10 files. Read them with the API, or fill sample lines for those filenames.</p>
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <p>{{ form.period_label }}</p>
+        <p><label>Folder <input type="file" name="files" webkitdirectory directory multiple></label></p>
+        <p><label>Or choose files <input type="file" name="files" accept="application/pdf,.pdf" multiple></label></p>
+        <div class="actions">
+          <button type="submit" name="action" value="read">Read invoices</button>
+          <button type="submit" class="secondary" name="action" value="mock">Mock these files</button>
+        </div>
+        {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      </form>
+    </section>
+  </div>
   {% if batches %}
-  <ul>
-    {% for batch in batches %}
+  <h2>Recent batches</h2>
+  <ul class="batch-list">
+    {% for item in batches %}
     <li>
-      <a href="{% url 'batch_detail' batch.pk %}">{{ batch.period_label|default:"Batch" }} {{ batch.pk }}</a>
-      <span class="muted">{{ batch.get_status_display }} · {{ batch.created|date:"Y-m-d H:i" }}</span>
+      <a href="{% url 'batch_detail' item.pk %}">{{ item.period_label|default:"Batch" }} {{ item.pk }}</a>
+      <span class="muted">{{ item.get_status_display }} · {{ item.created|date:"Y-m-d H:i" }}</span>
     </li>
     {% endfor %}
   </ul>
-  {% else %}
-  <p class="muted">No batches yet.</p>
   {% endif %}
 {% endblock %}

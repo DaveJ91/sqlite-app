@@ -166,6 +166,18 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(page, "Heat")
         self.assertContains(page, "return_prepared")
 
+    def test_mock_batch_needs_no_files(self):
+        response = self.client.post("/", {"action": "mock_batch", "period_label": "March 2026"})
+        batch = Batch.objects.get()
+        self.assertRedirects(response, f"/batches/{batch.pk}/")
+        self.assertEqual(InvoiceLine.objects.count(), 50)
+        self.assertEqual(batch.invoices.count(), 10)
+        self.assertFalse(batch.invoices.exclude(file="").exists())
+        page = self.client.get(f"/batches/{batch.pk}/")
+        self.assertContains(page, "Review extraction")
+        self.assertContains(page, "✓")
+        self.assertContains(page, "Harbour Consulting Ltd")
+
     @patch("items.graph.understand_invoice", side_effect=AssertionError("api"))
     def test_mock_extraction_skips_the_api(self, understand):
         response = self.client.post("/", {"files": [pdf_upload("a.pdf")], "action": "mock"})

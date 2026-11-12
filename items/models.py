@@ -27,7 +27,7 @@ class Batch(models.Model):
 
 class Invoice(models.Model):
     batch = models.ForeignKey(Batch, related_name="invoices", on_delete=models.CASCADE)
-    file = models.FileField(upload_to="invoices/")
+    file = models.FileField(upload_to="invoices/", blank=True)
     original_name = models.CharField(max_length=255)
     raw_response = models.JSONField(default=dict, blank=True)
     error = models.TextField(blank=True)

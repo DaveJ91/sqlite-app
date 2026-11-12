@@ -47,6 +47,9 @@ class LineForm(forms.ModelForm):
             "vat_amount",
             "gross_amount",
         ]
+        widgets = {
+            "description": forms.TextInput(),
+        }
 
 
 class ClassificationForm(forms.ModelForm):
