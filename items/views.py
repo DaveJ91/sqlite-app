@@ -1,38 +1,43 @@
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import ItemForm
-from .models import Item
+from .forms import InvoiceForm
+from .models import Invoice
+from .vat import ClassificationError, classify_invoice, extract_text
 
 
-def item_list(request):
+def invoice_list(request):
+    form = InvoiceForm()
     if request.method == "POST":
-        form = ItemForm(request.POST)
+        form = InvoiceForm(request.POST, request.FILES)
         if form.is_valid():
-            form.save()
-            return redirect("item_list")
-    else:
-        form = ItemForm()
+            invoice = form.save(commit=False)
+            invoice.original_name = request.FILES["file"].name
+            try:
+                invoice.extracted_text = extract_text(invoice.file)
+            except ClassificationError as exc:
+                invoice.error = str(exc)
+            else:
+                if not invoice.extracted_text:
+                    invoice.error = (
+                        "Could not read any text from this PDF. "
+                        "Scanned invoices need a text layer."
+                    )
+                else:
+                    try:
+                        invoice.classification = classify_invoice(
+                            invoice.extracted_text
+                        )
+                    except ClassificationError as exc:
+                        invoice.error = str(exc)
+            invoice.save()
+            return redirect("invoice_detail", pk=invoice.pk)
     return render(
         request,
         "items/list.html",
-        {"items": Item.objects.all(), "form": form},
+        {"invoices": Invoice.objects.all(), "form": form},
     )
 
 
-def item_edit(request, pk):
-    item = get_object_or_404(Item, pk=pk)
-    if request.method == "POST":
-        form = ItemForm(request.POST, instance=item)
-        if form.is_valid():
-            form.save()
-            return redirect("item_list")
-    else:
-        form = ItemForm(instance=item)
-    return render(request, "items/edit.html", {"item": item, "form": form})
-
-
-def item_delete(request, pk):
-    item = get_object_or_404(Item, pk=pk)
-    if request.method == "POST":
-        item.delete()
-    return redirect("item_list")
+def invoice_detail(request, pk):
+    invoice = get_object_or_404(Invoice, pk=pk)
+    return render(request, "items/detail.html", {"invoice": invoice})
