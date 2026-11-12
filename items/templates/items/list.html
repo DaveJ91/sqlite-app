@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Items</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; line-height: 1.4; }
+    h1 { font-size: 1.4rem; }
+    form.item p { margin: 0 0 0.6rem; }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 0.4rem 0.5rem; }
+    button, .link { padding: 0.35rem 0.7rem; }
+    ul { list-style: none; padding: 0; }
+    li { border-top: 1px solid #8884; padding: 0.8rem 0; }
+    .row { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+    .muted { color: #888; font-size: 0.85rem; }
+    form.inline { display: inline; }
+  </style>
+</head>
+<body>
+  <h1>Items</h1>
+  <form class="item" method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Add</button>
+  </form>
+  {% if items %}
+  <ul>
+    {% for item in items %}
+    <li>
+      <div class="row">
+        <strong>{{ item.title }}</strong>
+        <span class="muted">{{ item.updated|date:"Y-m-d H:i" }}</span>
+      </div>
+      {% if item.notes %}<p>{{ item.notes|linebreaksbr }}</p>{% endif %}
+      <a href="{% url 'item_edit' item.pk %}">Edit</a>
+      <form class="inline" method="post" action="{% url 'item_delete' item.pk %}">
+        {% csrf_token %}
+        <button type="submit">Delete</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nothing saved yet.</p>
+  {% endif %}
+</body>
+</html>
