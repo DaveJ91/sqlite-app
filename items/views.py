@@ -1,12 +1,14 @@
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .httpapi import ClientError
 
+from .desk import ask, present
 from .flags import batch_flags
-from .forms import ClassificationFormSet, DeductibilityFormSet, LineFormSet, UploadForm
+from .forms import ClassificationForm, ClassificationFormSet, DeductibilityForm, DeductibilityFormSet, LineForm, LineFormSet, UploadForm
 from .graph import run_step
 from .mocks import backfill_mock_history, seed_mock_batch
 from .models import AuditEvent, Batch, Invoice, InvoiceLine, SignOff, VatRun
@@ -17,9 +19,12 @@ from .vat3 import anomalies, box_rows, chart_months, period_date_from_label, rec
 
 def batch_list(request):
     form = UploadForm()
-    if request.method == "POST" and request.POST.get("action") == "mock_batch":
+    action = request.POST.get("action")
+    if request.method == "POST" and action == "mock_batch":
         batch = seed_mock_batch(request.POST.get("period_label", ""))
         return redirect("batch_detail", pk=batch.pk)
+    if request.method == "POST" and action in ("ask", "ask_file"):
+        return _desk_from_home(request)
     if request.method == "POST":
         form = UploadForm(request.POST, request.FILES)
         if form.is_valid():
@@ -33,6 +38,34 @@ def batch_list(request):
         request,
         "items/list.html",
         {"batches": Batch.objects.all(), "form": form, "plan": workspace_plan(None), "batch": None},
+    )
+
+
+def batch_desk(request, pk):
+    batch = get_object_or_404(Batch, pk=pk)
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "apply_edit":
+            _apply_desk_edit(request, batch)
+        elif action == "run":
+            _run_from_desk(request, batch)
+        else:
+            question = (request.POST.get("question") or "").strip()
+            if not question:
+                messages.error(request, "Ask a question first.")
+            elif action == "ask" and not (settings.XAI_API_KEY or "").strip():
+                messages.error(request, "Set XAI_API_KEY, or answer from the file.")
+            else:
+                ask(batch, question, use_grok=action == "ask")
+        return redirect("batch_desk", pk=batch.pk)
+    turns = [
+        {"question": turn.question, "mock": turn.mock, "created": turn.created, "blocks": present(batch, turn.blocks)}
+        for turn in batch.desk_turns.all()
+    ]
+    return render(
+        request,
+        "items/desk.html",
+        {"batch": batch, "plan": workspace_plan(batch), "turns": turns},
     )
 
 
@@ -271,6 +304,71 @@ def dashboard(request):
             },
         },
     )
+
+
+def _desk_from_home(request):
+    action = request.POST.get("action")
+    question = (request.POST.get("question") or "").strip() or "What should I look at on this batch?"
+    if action == "ask" and not (settings.XAI_API_KEY or "").strip():
+        messages.error(request, "Set XAI_API_KEY, or answer from the file.")
+        return redirect("batch_list")
+    batch = Batch.objects.order_by("-id").first()
+    if batch is None:
+        batch = seed_mock_batch(request.POST.get("period_label", ""))
+    ask(batch, question, use_grok=action == "ask")
+    return redirect("batch_desk", pk=batch.pk)
+
+
+def _run_from_desk(request, batch):
+    if request.POST.get("step") != "deduct" or batch.status != Batch.CLASSIFIED:
+        messages.error(request, "That step is not open.")
+        return
+    try:
+        run_step(batch.id, "deduct", mock=True)
+    except ClientError as exc:
+        messages.error(request, str(exc))
+        return
+    ask(batch, "Run mock deductibility", use_grok=False)
+
+
+def _apply_desk_edit(request, batch):
+    try:
+        line_id = int(request.POST.get("line_id") or 0)
+    except ValueError:
+        messages.error(request, "That line is not on this batch.")
+        return
+    lines = list(_lines(batch))
+    if not any(line.id == line_id for line in lines):
+        messages.error(request, "That line is not on this batch.")
+        return
+    form_class, formset_class, save = {
+        Batch.EXTRACTED: (LineForm, LineFormSet, lambda formset: _save_line_edits(batch, formset, "edited")),
+        Batch.CLASSIFIED: (ClassificationForm, ClassificationFormSet, lambda formset: _save_categories(batch, formset)),
+        Batch.DEDUCTIBILITY: (DeductibilityForm, DeductibilityFormSet, lambda formset: _save_deductibility(batch, formset)),
+    }.get(batch.status, (None, None, None))
+    if form_class is None:
+        messages.error(request, "That edit is closed on this batch.")
+        return
+    data = {
+        "form-TOTAL_FORMS": str(len(lines)),
+        "form-INITIAL_FORMS": str(len(lines)),
+        "form-MIN_NUM_FORMS": "0",
+        "form-MAX_NUM_FORMS": "1000",
+    }
+    fields = list(form_class.base_fields)
+    for index, line in enumerate(lines):
+        data[f"form-{index}-id"] = str(line.id)
+        for field in fields:
+            if line.id == line_id and field in request.POST:
+                data[f"form-{index}-{field}"] = request.POST.get(field, "")
+            else:
+                value = getattr(line, field)
+                data[f"form-{index}-{field}"] = "" if value is None else str(value)
+    formset = formset_class(data, queryset=_lines(batch))
+    if not formset.is_valid():
+        messages.error(request, "That edit was not saved.")
+        return
+    save(formset)
 
 
 def _lines(batch):

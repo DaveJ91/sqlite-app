@@ -11,6 +11,7 @@ Local Irish VAT working paper. SQLite, Django, Grok when a live call is asked fo
 - Sign-off with a typed name, the open flags, and every override, then the VAT3 return.
 - Boxes T1–T4, E1, E2, ES1, ES2, PA1. Payment or refund. Comparison with the last 12 months. Run history and an audit trail.
 - Five-second step animation. Save stays instant.
+- Generative desk at `/batches/<id>/desk/`. A question returns blocks the templates render: prose, a line and its chain, flags, VAT3 boxes, the 12-month comparison, a line edit, and a sign-off draft. Answer from the file makes no API call. Ask Grok uses the same blocks. The sign-off name is typed by a person. Machine steps from the desk stay on the mock.
 
 ## Next
 
@@ -34,14 +35,4 @@ Write, with the same gates as the pages:
 
 Also expose the batch JSON and the training catalogue as resources, and a `review_batch` prompt that stops before sign-off.
 
-Ship the read tools, `preview_return`, `lookup_treatment`, and `start_mock_batch` first.
-
-### 2. Generative desk
-
-A desk column on the batch, and a question on the home page. Grok calls the same operations as the MCP server and answers with blocks. Django renders the blocks. The model does not send HTML.
-
-Blocks: prose, line and chain, flags, VAT3 boxes, the 12-month comparison, a line edit, and sign-off. An edit posts to the existing save. A change stays an override. The sign-off block is the name field and the flag tick. The agent can draft the note. It cannot sign.
-
-A read is instant. A machine step keeps the five-second animation and defaults to the mock. Each turn is stored on the batch so the trail shows what the agent suggested and what a person saved.
-
-The step pages stay. Build this after the shared tool module exists, so the desk and the MCP server call one path.
+Ship the read tools, `preview_return`, `lookup_treatment`, and `start_mock_batch` first. The desk already calls `items/agent_tools.py`. The MCP server should wrap that module rather than a second copy.

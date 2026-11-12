@@ -189,3 +189,18 @@ class SignOff(models.Model):
 
     def __str__(self):
         return f"{self.reviewer} on batch {self.batch_id}"
+
+
+class DeskTurn(models.Model):
+    batch = models.ForeignKey(Batch, related_name="desk_turns", on_delete=models.CASCADE)
+    created = models.DateTimeField(auto_now_add=True)
+    question = models.TextField()
+    blocks = models.JSONField(default=list, blank=True)
+    tool_names = models.JSONField(default=list, blank=True)
+    mock = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["created", "id"]
+
+    def __str__(self):
+        return f"Desk {self.batch_id} · {self.created:%Y-%m-%d %H:%M}"

@@ -538,6 +538,209 @@ def _button(html, value):
     return html.split(f'value="{value}"')[0].rsplit("<button", 1)[-1]
 
 
+class DeskTests(TestCase):
+    def _batch(self):
+        batch = Batch.objects.create(status=Batch.CLASSIFIED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="fuel.pdf", file=pdf_upload("fuel.pdf"))
+        invoice.lines.create(
+            description="Petrol",
+            supplier="Green Fuel Oils",
+            invoice_number="GF-338",
+            invoice_date="2026-03-04",
+            currency="EUR",
+            net_amount="300.00",
+            vat_amount="69.00",
+            gross_amount="369.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+            model_category="standard",
+            deductible="none",
+            blocked_reason="petrol",
+            deductible_percent="0",
+            deductible_vat="0.00",
+            model_deductible="none",
+            deductibility_chain=[{"step": "Blocked input", "finding": "Petrol", "because": "VATCA s.60."}],
+        )
+        invoice.lines.create(
+            description="Management consulting",
+            supplier="Harbour Consulting Ltd",
+            invoice_number="HC-1042",
+            invoice_date="2026-03-02",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="23.00",
+            gross_amount="123.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+            model_category="standard",
+            deductible="full",
+            blocked_reason="none",
+            deductible_percent="100",
+            deductible_vat="23.00",
+            model_deductible="full",
+        )
+        return batch
+
+    @patch("items.desk.post_json", side_effect=AssertionError("api"))
+    def test_file_answer_shows_the_blocked_line(self, _post):
+        batch = self._batch()
+        response = self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {"action": "ask_file", "question": "What is non-deductible, and what does that do to the refund?"},
+        )
+        self.assertRedirects(response, f"/batches/{batch.pk}/desk/")
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "Petrol")
+        self.assertContains(page, "Blocked input")
+        self.assertContains(page, "Non-deductible")
+        self.assertContains(page, "23.00")
+        self.assertContains(page, "From the file")
+        self.assertTrue(AuditEvent.objects.filter(kind="agent_turn", payload__mock=True).exists())
+        html = page.content.decode()
+        self.assertNotIn("data-wait", _button(html, "ask_file"))
+        self.assertIn("data-wait", _button(html, "run"))
+
+    @override_settings(XAI_API_KEY="test-key", GROK_MODEL="grok-4.7")
+    @patch("items.desk.post_json")
+    def test_grok_renders_blocks_and_escapes_text(self, post_json):
+        batch = self._batch()
+        line = InvoiceLine.objects.get(description="Petrol")
+
+        def respond(url, payload, api_key):
+            self.assertEqual(url, "https://api.x.ai/v1/responses")
+            calls = [item for item in payload.get("input", []) if isinstance(item, dict) and item.get("type") == "function_call_output"]
+            if not calls:
+                return {
+                    "id": "resp_1",
+                    "output": [
+                        {"type": "function_call", "name": "list_lines", "call_id": "c1", "arguments": "{}"}
+                    ],
+                }
+            self.assertEqual(payload["previous_response_id"], "resp_1")
+            return {
+                "id": "resp_2",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "render",
+                        "call_id": "c2",
+                        "arguments": json.dumps(
+                            {
+                                "blocks": [
+                                    {"type": "prose", "text": "<script>alert(1)</script>"},
+                                    {"type": "line", "line_id": line.id},
+                                ]
+                            }
+                        ),
+                    }
+                ],
+            }
+
+        post_json.side_effect = respond
+        response = self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {"action": "ask", "question": "Show me the petrol line."},
+        )
+        self.assertRedirects(response, f"/batches/{batch.pk}/desk/")
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "&lt;script&gt;alert(1)&lt;/script&gt;")
+        self.assertNotContains(page, "<script>alert(1)</script>")
+        self.assertContains(page, "VATCA s.60.")
+        self.assertEqual(post_json.call_count, 2)
+
+    def test_edit_posts_through_the_classification_save(self):
+        batch = self._batch()
+        line = InvoiceLine.objects.get(description="Management consulting")
+        self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {"action": "ask_file", "question": "Override the management consulting rate"},
+        )
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "Edit Management consulting")
+        response = self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {
+                "action": "apply_edit",
+                "line_id": str(line.id),
+                "category": "reduced",
+                "supply": "taxable",
+                "nature": "service",
+                "place_of_supply": "ireland",
+                "who_accounts": "supplier",
+            },
+        )
+        self.assertRedirects(response, f"/batches/{batch.pk}/desk/")
+        line.refresh_from_db()
+        self.assertEqual(line.category, "reduced")
+        self.assertEqual(line.rate, "13.5%")
+        self.assertEqual(line.model_category, "standard")
+        self.assertTrue(line.classification_overridden)
+        self.assertTrue(AuditEvent.objects.filter(kind="classification_edited", payload__field="category").exists())
+
+    def test_signoff_block_leaves_the_name_blank(self):
+        batch = self._batch()
+        batch.status = Batch.DEDUCTION_ACCEPTED
+        batch.save(update_fields=["status"])
+        self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {"action": "ask_file", "question": "Draft the sign-off note"},
+        )
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "The name has to be yours.")
+        self.assertContains(page, 'name="reviewer"')
+        self.assertContains(page, 'placeholder="Your name"')
+        self.assertContains(page, "Left non-deductible: Petrol.")
+        html = page.content.decode()
+        reviewer = html.split('name="reviewer"')[1].split(">", 1)[0]
+        self.assertNotIn("value=", reviewer)
+
+    @override_settings(XAI_API_KEY="")
+    def test_missing_key_does_not_call_grok(self):
+        batch = self._batch()
+        with patch("items.desk.post_json", side_effect=AssertionError("api")):
+            response = self.client.post(
+                f"/batches/{batch.pk}/desk/",
+                {"action": "ask", "question": "Hello"},
+                follow=True,
+            )
+        self.assertContains(response, "Set XAI_API_KEY")
+        self.assertFalse(batch.desk_turns.exists())
+
+    @patch("items.desk.post_json", side_effect=AssertionError("api"))
+    def test_home_question_starts_a_batch_from_the_file(self, _post):
+        response = self.client.post("/", {"action": "ask_file", "question": "What should I look at?"})
+        batch = Batch.objects.get()
+        self.assertRedirects(response, f"/batches/{batch.pk}/desk/")
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "50 lines")
+        self.assertContains(page, "Management consulting")
+
+    def test_old_line_without_a_chain_says_so(self):
+        batch = Batch.objects.create(status=Batch.RETURN_READY, period_label="February 2026")
+        invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
+        invoice.lines.create(
+            description="Consulting",
+            supplier="Acme",
+            invoice_number="100",
+            invoice_date="2026-02-01",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="23.00",
+            gross_amount="123.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+        )
+        self.client.post(
+            f"/batches/{batch.pk}/desk/",
+            {"action": "ask_file", "question": "Show me the consulting line"},
+        )
+        page = self.client.get(f"/batches/{batch.pk}/desk/")
+        self.assertContains(page, "No classification chain was stored.")
+
+
 class ReaderFallbackTests(TestCase):
     @override_settings(
         CONTENT_UNDERSTANDING_BASE_URL="",

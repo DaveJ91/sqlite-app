@@ -3,6 +3,19 @@
 {% block heading %}Start a batch{% endblock %}
 {% block body %}
   <p class="lede">Work a set of purchase invoices through extraction, VAT classification, deductibility, sign-off, and a return. The plan on the left ticks off as you go.</p>
+  <section class="card" style="margin-bottom: 1rem;">
+    <h2>Ask the desk</h2>
+    <p class="muted">A question about the latest batch. If there is no batch yet, this starts the 50-line mock. Answer from the file makes no API call.</p>
+    <form method="post">
+      {% csrf_token %}
+      <p><input type="text" name="question" placeholder="What should I look at?"></p>
+      <p><input type="text" name="period_label" placeholder="Period, if a new mock batch is needed"></p>
+      <div class="actions">
+        <button type="submit" name="action" value="ask">Ask Grok</button>
+        <button type="submit" class="secondary" name="action" value="ask_file">Answer from the file</button>
+      </div>
+    </form>
+  </section>
   <div class="grid">
     <section class="card">
       <h2>Mock batch, no files</h2>

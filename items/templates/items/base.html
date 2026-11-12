@@ -81,6 +81,10 @@
     tr.flag { background: var(--amber); }
     tr.flag td { color: #1c1917; }
     .pill { display: inline-block; border-radius: 999px; padding: 0.1rem 0.45rem; background: var(--amber); color: var(--amber-ink); font-size: 0.72rem; font-weight: 700; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.2rem 0 0.4rem; }
+    .chips form { margin: 0; }
+    .turn { margin-top: 1.4rem; padding-top: 0.2rem; }
+    .turn h2 { font-size: 1.25rem; }
     .error { color: var(--danger); }
     .muted { color: var(--muted); }
     .batch-list { list-style: none; padding: 0; margin: 1.5rem 0 0; }
@@ -271,6 +275,7 @@
         </li>
         {% endfor %}
       </ol>
+      {% if batch %}<a class="dash-link" href="{% url 'batch_desk' batch.pk %}">Ask the desk</a>{% endif %}
       <a class="dash-link" href="{% url 'dashboard' %}">Dashboard</a>
     </aside>
     <main>

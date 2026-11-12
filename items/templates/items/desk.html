@@ -1,0 +1,171 @@
+{% extends "items/base.html" %}
+{% block title %}Ask the desk{% endblock %}
+{% block heading %}Ask the desk{% endblock %}
+{% block body %}
+  <p class="lede">Ask in plain language. The answer is the same cards as the working paper: a line and its chain, the flags, the VAT3 boxes, an edit, or the sign-off. The model does not write the page.</p>
+
+  <form method="post" class="card" style="margin-bottom: 1rem;">
+    {% csrf_token %}
+    <p><input type="text" name="question" placeholder="What is non-deductible, and what does that do to the refund?"></p>
+    <div class="actions">
+      <button type="submit" name="action" value="ask">Ask Grok</button>
+      <button type="submit" class="secondary" name="action" value="ask_file">Answer from the file</button>
+    </div>
+  </form>
+
+  <div class="chips">
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="question" value="What is non-deductible, and what does that do to the refund?">
+      <button type="submit" class="secondary" name="action" value="ask_file">Non-deductible VAT</button>
+    </form>
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="question" value="Which flags are open?">
+      <button type="submit" class="secondary" name="action" value="ask_file">Open flags</button>
+    </form>
+    <form method="post">{% csrf_token %}
+      <input type="hidden" name="question" value="Draft the sign-off note">
+      <button type="submit" class="secondary" name="action" value="ask_file">Draft the sign-off</button>
+    </form>
+    {% if batch.status == "classified" %}
+    <form method="post" data-step="deduct">{% csrf_token %}
+      <input type="hidden" name="step" value="deduct">
+      <button type="submit" data-wait name="action" value="run">Mock deductibility</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if not turns %}
+  <p class="muted" style="margin-top: 1.2rem;">No question yet. An answer from the file reads the batch. Ask Grok when you want the model to choose the cards.</p>
+  {% endif %}
+
+  {% for turn in turns %}
+  <section class="turn">
+    <p class="kicker">{% if turn.mock %}From the file{% else %}Grok{% endif %} · {{ turn.created|date:"H:i" }}</p>
+    <h2>{{ turn.question }}</h2>
+    {% for block in turn.blocks %}
+      {% if block.type == "prose" %}
+      <p>{{ block.text }}</p>
+      {% elif block.type == "line" %}
+      <article class="card" style="margin: 0.8rem 0;">
+        <h2>{{ block.description }}</h2>
+        <p class="muted">{{ block.supplier }} · net {{ block.net }} · VAT {{ block.vat }} · recoverable {{ block.recoverable }}</p>
+        <p>
+          {% if block.category %}{{ block.category }}{% endif %}
+          {% if block.deductible %} · {{ block.deductible }}{% endif %}
+          {% if block.blocked_reason %} · {{ block.blocked_reason }}{% endif %}
+          {% for pill in block.pills %}<span class="pill">{{ pill }}</span> {% endfor %}
+        </p>
+        <div class="split">
+          <div>
+            <p class="eyebrow">Classification</p>
+            <ol class="reason-chain">
+              {% for step in block.class_chain %}
+              <li><span class="code">{{ step.step }}</span> {{ step.finding }}<div class="muted">{{ step.because }}</div></li>
+              {% empty %}<li class="muted">No chain was returned.</li>{% endfor %}
+            </ol>
+            {% if block.class_note %}<p class="muted">{{ block.class_note }}</p>{% endif %}
+          </div>
+          <div>
+            <p class="eyebrow">Deductibility</p>
+            <ol class="reason-chain">
+              {% for step in block.deduct_chain %}
+              <li><span class="code">{{ step.step }}</span> {{ step.finding }}<div class="muted">{{ step.because }}</div></li>
+              {% empty %}<li class="muted">No chain was returned.</li>{% endfor %}
+            </ol>
+            {% if block.deduct_note %}<p class="muted">{{ block.deduct_note }}</p>{% endif %}
+          </div>
+        </div>
+      </article>
+      {% elif block.type == "flags" %}
+      <section class="card anomaly" style="margin: 0.8rem 0;">
+        <h2>Open flags</h2>
+        {% if block.items %}
+        <ul>{% for flag in block.items %}<li>{{ flag.description }} — {{ flag.text }}</li>{% endfor %}</ul>
+        {% else %}<p class="muted">No arithmetic, invoice, or blocked-input flags are open.</p>{% endif %}
+      </section>
+      {% elif block.type == "boxes" %}
+      <section class="card" style="margin: 0.8rem 0;">
+        <h2>{{ block.title }}</h2>
+        <p class="muted">{{ block.outcome }} · {{ block.due }}</p>
+        <div class="boxgrid">
+          {% for box in block.rows %}
+          <div class="vbox {% if box.hot %}hot{% endif %}">
+            <div class="code">{{ box.code }}</div>
+            <div class="amt">{{ box.amount }}</div>
+            <div class="hint">{{ box.label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% elif block.type == "comparison" %}
+      <section class="card" style="margin: 0.8rem 0;">
+        <h2>Last 12 months</h2>
+        <p class="muted">Against {{ block.prior_count }} earlier return{{ block.prior_count|pluralize }}.</p>
+        <div class="chart">
+          {% for month in block.months %}
+          <div class="col" title="{{ month.label }} {{ month.year }}">
+            <div class="pair">
+              <i class="t1" style="height: {{ month.t1_pct }}%"></i>
+              <i class="t2" style="height: {{ month.t2_pct }}%"></i>
+            </div>
+            <small>{{ month.label }}</small>
+          </div>
+          {% endfor %}
+        </div>
+        {% if block.texts %}
+        <ul>{% for text in block.texts %}<li>{{ text }}</li>{% endfor %}</ul>
+        {% elif block.prior_count < 3 %}
+        <p class="muted">Fewer than three earlier returns, so the 25% check is waiting.</p>
+        {% endif %}
+      </section>
+      {% elif block.type == "edit" %}
+      <section class="card" style="margin: 0.8rem 0;">
+        <h2>Edit {{ block.description }}</h2>
+        {% if block.open %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="line_id" value="{{ block.line_id }}">
+          {% for field in block.fields %}
+          <p><label>{{ field.label }}
+            {% if field.choices %}
+            <select name="{{ field.name }}">
+              {% for value, label in field.choices %}
+              <option value="{{ value }}"{% if value == field.value %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input name="{{ field.name }}" value="{{ field.value }}">
+            {% endif %}
+          </label></p>
+          {% endfor %}
+          <button type="submit" class="secondary" name="action" value="apply_edit">Save this line</button>
+        </form>
+        {% else %}
+        <p class="muted">{{ block.text }}</p>
+        {% endif %}
+      </section>
+      {% elif block.type == "signoff" %}
+      <section class="card" style="margin: 0.8rem 0;">
+        <h2>Sign-off</h2>
+        {% if block.reviewer %}
+        <p>Signed by {{ block.reviewer }}.</p>
+        {% elif block.open %}
+        <form method="post" action="{% url 'batch_signoff' batch.pk %}" data-step="return">
+          {% csrf_token %}
+          <p><input type="text" name="reviewer" placeholder="Your name" required></p>
+          <p><textarea name="note" rows="3">{{ block.note }}</textarea></p>
+          {% if block.needs_ack %}
+          <p><label><input type="checkbox" name="acknowledge" value="on"> I have reviewed every flag.</label></p>
+          {% endif %}
+          <button type="submit" data-wait name="action" value="sign">Sign and prepare the return</button>
+        </form>
+        {% else %}
+        <p class="muted">Sign-off opens after deductibility is accepted. The draft stays here.</p>
+        <p>{{ block.note }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% endfor %}
+{% endblock %}
