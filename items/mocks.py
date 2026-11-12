@@ -1,25 +1,23 @@
-import random
 from datetime import datetime, time
-from decimal import Decimal
 
 from django.utils import timezone
 
 from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatRun
-from .vat import RATES
+from .training import amounts, classification_for, deductibility_for, register_descriptions
 from .vat3 import payment_boxes, period_date_from_label, shift_month
 
-# Ten suppliers, five lines each. Fifty rows, no files required.
+# Ten suppliers, five lines each. The third item on each row is the training key.
 _CATALOG = [
     (
         "Harbour Consulting Ltd",
         "HC-1042",
         "2026-03-02",
         [
-            ("Management consulting", "1500.00"),
-            ("Workshop facilitation", "800.00"),
-            ("Travel expenses", "80.00"),
-            ("Research briefing", "450.00"),
-            ("Board pack design", "220.00"),
+            ("Management consulting", "1500.00", "consulting"),
+            ("Workshop facilitation", "800.00", "consulting"),
+            ("Hotel accommodation", "220.00", "hotel"),
+            ("Research briefing", "450.00", "consulting"),
+            ("Board pack design", "220.00", "consulting"),
         ],
     ),
     (
@@ -27,11 +25,11 @@ _CATALOG = [
         "GF-338",
         "2026-03-04",
         [
-            ("Heating oil", "640.00"),
-            ("Diesel", "510.00"),
-            ("Tank rental", "75.00"),
-            ("Emergency call-out", "140.00"),
-            ("Fuel surcharge", "36.00"),
+            ("Heating oil", "640.00", "heating"),
+            ("Diesel", "510.00", "diesel"),
+            ("Petrol", "300.00", "petrol"),
+            ("Tank rental", "75.00", "overhead"),
+            ("Emergency call-out", "140.00", "repairs"),
         ],
     ),
     (
@@ -39,11 +37,11 @@ _CATALOG = [
         "CN-90",
         "2026-03-05",
         [
-            ("Newspapers", "45.00"),
-            ("Trade magazines", "62.00"),
-            ("Stationery", "30.00"),
-            ("Printer paper", "48.00"),
-            ("Postage stamps", "25.00"),
+            ("Newspapers", "45.00", "newspaper"),
+            ("Trade magazines", "62.00", "newspaper"),
+            ("Stationery", "30.00", "stationery"),
+            ("Printer paper", "48.00", "stationery"),
+            ("Postage stamps", "25.00", "stamps"),
         ],
     ),
     (
@@ -51,11 +49,11 @@ _CATALOG = [
         "NR-17",
         "2026-03-06",
         [
-            ("Building repairs", "900.00"),
-            ("Plumbing labour", "320.00"),
-            ("Replacement fittings", "150.00"),
-            ("Emergency leak", "210.00"),
-            ("Site visit", "80.00"),
+            ("Building repairs", "900.00", "repairs"),
+            ("Plumbing labour", "320.00", "repairs"),
+            ("Replacement fittings", "150.00", "stationery"),
+            ("Emergency leak", "210.00", "repairs"),
+            ("Site visit", "80.00", "overhead"),
         ],
     ),
     (
@@ -63,11 +61,11 @@ _CATALOG = [
         "DOS-551",
         "2026-03-09",
         [
-            ("Desk chairs", "740.00"),
-            ("Monitor arms", "260.00"),
-            ("Notebooks", "54.00"),
-            ("Toner cartridges", "128.00"),
-            ("Whiteboard", "95.00"),
+            ("Desk chairs", "740.00", "stationery"),
+            ("Monitor arms", "260.00", "stationery"),
+            ("Notebooks", "54.00", "stationery"),
+            ("Toner cartridges", "128.00", "stationery"),
+            ("Company car hire", "480.00", "car"),
         ],
     ),
     (
@@ -75,11 +73,11 @@ _CATALOG = [
         "LC-208",
         "2026-03-11",
         [
-            ("Working lunch", "186.00"),
-            ("Conference coffee", "92.00"),
-            ("Evening reception", "640.00"),
-            ("Staff canteen", "410.00"),
-            ("Disposable service", "36.00"),
+            ("Working lunch", "186.00", "food"),
+            ("Conference coffee", "92.00", "food"),
+            ("Evening reception", "640.00", "entertainment"),
+            ("Staff canteen", "410.00", "canteen"),
+            ("Disposable service", "36.00", "stationery"),
         ],
     ),
     (
@@ -87,11 +85,11 @@ _CATALOG = [
         "CS-77",
         "2026-03-13",
         [
-            ("Software subscription", "1200.00"),
-            ("Implementation support", "960.00"),
-            ("Training seats", "480.00"),
-            ("Data migration", "700.00"),
-            ("Priority support", "150.00"),
+            ("Software subscription", "1200.00", "software"),
+            ("Implementation support", "960.00", "software"),
+            ("Training seats", "480.00", "software"),
+            ("Data migration", "700.00", "software"),
+            ("EU software licence", "900.00", "eu_software"),
         ],
     ),
     (
@@ -99,23 +97,23 @@ _CATALOG = [
         "PP-412",
         "2026-03-16",
         [
-            ("Letterheads", "180.00"),
-            ("Business cards", "70.00"),
-            ("Brochures", "340.00"),
-            ("Banner", "125.00"),
-            ("Proofing", "40.00"),
+            ("Letterheads", "180.00", "stationery"),
+            ("Business cards", "70.00", "stationery"),
+            ("Brochures", "340.00", "stationery"),
+            ("Banner", "125.00", "stationery"),
+            ("Proofing", "40.00", "overhead"),
         ],
     ),
     (
-        "Wicklow Timber",
-        "WT-63",
+        "Ennis Mart",
+        "EM-12",
         "2026-03-18",
         [
-            ("Timber supplies", "880.00"),
-            ("Sheet materials", "460.00"),
-            ("Fixings", "74.00"),
-            ("Delivery", "90.00"),
-            ("Cutting service", "110.00"),
+            ("Store cattle", "880.00", "livestock"),
+            ("Calves", "460.00", "livestock"),
+            ("Haulage", "90.00", "overhead"),
+            ("Mart commission", "74.00", "overhead"),
+            ("Animal feed", "110.00", "feed"),
         ],
     ),
     (
@@ -123,26 +121,24 @@ _CATALOG = [
         "ML-19",
         "2026-03-20",
         [
-            ("Contract review", "1100.00"),
-            ("Companies office filing", "180.00"),
-            ("Meeting attendance", "400.00"),
-            ("Letter of advice", "650.00"),
-            ("Disbursements", "55.00"),
+            ("Contract review", "1100.00", "legal"),
+            ("Companies office filing", "180.00", "disbursement"),
+            ("Meeting attendance", "400.00", "legal"),
+            ("Letter of advice", "650.00", "legal"),
+            ("Client entertainment", "55.00", "entertainment"),
         ],
     ),
 ]
 
+register_descriptions(
+    {description: treatment for _supplier, _number, _date, rows in _CATALOG for description, _net, treatment in rows}
+)
 
-def _line(description, net):
-    net_amount = Decimal(net)
-    vat_amount = (net_amount * Decimal("0.23")).quantize(Decimal("0.01"))
-    gross_amount = net_amount + vat_amount
-    return {
-        "description": description,
-        "net_amount": f"{net_amount:.2f}",
-        "vat_amount": f"{vat_amount:.2f}",
-        "gross_amount": f"{gross_amount:.2f}",
-    }
+
+def _line(description, net, treatment):
+    priced = amounts(net, treatment)
+    priced["description"] = description
+    return priced
 
 
 def catalog():
@@ -155,7 +151,7 @@ def catalog():
                 "invoice_date": date,
                 "currency": "EUR",
                 "filename": f"{number}.pdf",
-                "lines": [_line(description, net) for description, net in rows],
+                "lines": [_line(description, net, treatment) for description, net, treatment in rows],
             }
         )
     return invoices
@@ -280,18 +276,18 @@ def backfill_mock_history():
 
 
 def mock_classification(lines):
-    categories = list(RATES)
     rows = []
     for line in lines:
-        category = random.choice(categories)
-        confidence = round(random.uniform(0.35, 0.99), 2)
-        rows.append(
-            {
-                "line_id": line.id,
-                "category": category,
-                "confidence": confidence,
-                "reason": "Mock classification.",
-                "error": "",
-            }
-        )
+        trained = classification_for(line.description)
+        trained["line_id"] = line.id
+        rows.append(trained)
+    return rows
+
+
+def mock_deductibility(lines):
+    rows = []
+    for line in lines:
+        trained = deductibility_for(line.description)
+        trained["line_id"] = line.id
+        rows.append(trained)
     return rows

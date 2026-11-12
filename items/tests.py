@@ -7,8 +7,9 @@ from django.test import TestCase, override_settings
 
 from types import SimpleNamespace
 
+from .flags import line_flags
 from .httpapi import output_text, parse_json_content
-from .models import AuditEvent, Batch, InvoiceLine, VatRun
+from .models import AuditEvent, Batch, InvoiceLine, SignOff, VatRun
 from .understanding import understand_invoice
 from .vat3 import anomalies, payment_boxes, vat3_boxes
 
@@ -128,6 +129,7 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(page, "0.91")
         self.assertEqual(batch.runs.filter(kind="classify").count(), 1)
         self.assertEqual(batch.runs.filter(kind="extract").count(), 1)
+        self.assertContains(page, "Rate")
 
     def test_low_confidence_is_highlighted(self):
         batch = Batch.objects.create(status=Batch.CLASSIFIED)
@@ -146,23 +148,11 @@ class BatchWorkflowTests(TestCase):
         invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
         invoice.lines.create(description="Consulting", net_amount="100.00", vat_amount="23.00", gross_amount="123.00", category="standard", rate="23%", confidence=0.95, reason="Services")
         invoice.lines.create(description="Heat", net_amount="40.00", vat_amount="5.40", gross_amount="45.40", category="reduced", rate="13.5%", confidence=0.88, reason="Fuel")
-        first, second = invoice.lines.order_by("id")
-        response = self.client.post(
-            f"/batches/{batch.pk}/vat/",
-            {
-                "action": "accept",
-                "form-TOTAL_FORMS": "2",
-                "form-INITIAL_FORMS": "2",
-                "form-MIN_NUM_FORMS": "0",
-                "form-MAX_NUM_FORMS": "1000",
-                "form-0-id": str(first.id),
-                "form-0-category": "standard",
-                "form-1-id": str(second.id),
-                "form-1-category": "reduced",
-            },
-        )
+        response = complete_to_return(self.client, batch)
         self.assertRedirects(response, f"/batches/{batch.pk}/return/")
         page = self.client.get(f"/batches/{batch.pk}/return/")
+        self.assertContains(page, "Alex Byrne")
+        self.assertContains(page, "signed_off")
         self.assertContains(page, "Standard 23%")
         self.assertContains(page, "100.00")
         self.assertContains(page, "Reduced 13.5%")
@@ -202,25 +192,64 @@ class BatchWorkflowTests(TestCase):
 
     @patch("items.graph.classify_lines", side_effect=AssertionError("api"))
     @patch("items.graph.understand_invoice", side_effect=lambda path, filename: (EXTRACTED, "grok"))
-    def test_mock_vat_assigns_a_random_category(self, _understand, classify):
+    def test_mock_vat_uses_the_training_row(self, _understand, classify):
         self.client.post("/", {"files": [pdf_upload("a.pdf")]})
         line = InvoiceLine.objects.get()
-        with patch("items.mocks.random.choice", return_value="reduced"), patch(
-            "items.mocks.random.uniform", return_value=0.42
-        ):
-            response = self.client.post(
-                f"/batches/{line.invoice.batch_id}/",
-                line_post(line, action="mock_vat"),
-            )
+        response = self.client.post(
+            f"/batches/{line.invoice.batch_id}/",
+            line_post(line, action="mock_vat", description="Management consulting"),
+        )
         classify.assert_not_called()
         line.refresh_from_db()
         self.assertRedirects(response, f"/batches/{line.invoice.batch_id}/vat/")
-        self.assertEqual(line.category, "reduced")
-        self.assertEqual(line.rate, "13.5%")
-        self.assertEqual(line.confidence, 0.42)
-        self.assertEqual(line.reason, "Mock classification.")
+        self.assertEqual(line.description, "Management consulting")
+        self.assertEqual(line.category, "standard")
+        self.assertEqual(line.rate, "23%")
+        self.assertEqual(line.nature, "service")
+        self.assertEqual(line.place_of_supply, "ireland")
+        self.assertGreater(line.confidence, 0.7)
         page = self.client.get(f"/batches/{line.invoice.batch_id}/vat/")
-        self.assertContains(page, "Low confidence")
+        self.assertContains(page, "Place of supply")
+        self.assertContains(page, "Service")
+        self.assertContains(page, "Who accounts")
+
+
+CLASS_FIELDS = ["category", "supply", "nature", "place_of_supply", "who_accounts"]
+DEDUCT_FIELDS = ["deductible", "blocked_reason", "deductible_percent"]
+
+
+def batch_lines(batch):
+    return list(InvoiceLine.objects.filter(invoice__batch=batch))
+
+
+def formset_post(lines, fields, action, overrides=None):
+    overrides = overrides or {}
+    payload = {
+        "action": action,
+        "form-TOTAL_FORMS": str(len(lines)),
+        "form-INITIAL_FORMS": str(len(lines)),
+        "form-MIN_NUM_FORMS": "0",
+        "form-MAX_NUM_FORMS": "1000",
+    }
+    for index, line in enumerate(lines):
+        payload[f"form-{index}-id"] = str(line.id)
+        for field in fields:
+            if (line.id, field) in overrides:
+                payload[f"form-{index}-{field}"] = overrides[(line.id, field)]
+            else:
+                payload[f"form-{index}-{field}"] = getattr(line, field) or ""
+    return payload
+
+
+def complete_to_return(client, batch, reviewer="Alex Byrne"):
+    lines = batch_lines(batch)
+    client.post(f"/batches/{batch.pk}/vat/", formset_post(lines, CLASS_FIELDS, "mock_deduct"))
+    lines = batch_lines(batch)
+    client.post(f"/batches/{batch.pk}/deduct/", formset_post(lines, DEDUCT_FIELDS, "accept"))
+    return client.post(
+        f"/batches/{batch.pk}/sign/",
+        {"action": "sign", "reviewer": reviewer, "note": "Reviewed.", "acknowledge": "on"},
+    )
 
 
 def _two_line_post(first, second, action):
@@ -286,21 +315,7 @@ class Vat3Tests(TestCase):
         invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
         invoice.lines.create(description="Consulting", net_amount="100.00", vat_amount="23.00", gross_amount="123.00", category="standard", rate="23%", confidence=0.95, reason="Services")
         invoice.lines.create(description="Heat", net_amount="40.00", vat_amount="5.40", gross_amount="45.40", category="reduced", rate="13.5%", confidence=0.88, reason="Fuel")
-        first, second = invoice.lines.order_by("id")
-        response = self.client.post(
-            f"/batches/{batch.pk}/vat/",
-            {
-                "action": "accept",
-                "form-TOTAL_FORMS": "2",
-                "form-INITIAL_FORMS": "2",
-                "form-MIN_NUM_FORMS": "0",
-                "form-MAX_NUM_FORMS": "1000",
-                "form-0-id": str(first.id),
-                "form-0-category": "standard",
-                "form-1-id": str(second.id),
-                "form-1-category": "reduced",
-            },
-        )
+        response = complete_to_return(self.client, batch)
         self.assertRedirects(response, f"/batches/{batch.pk}/return/")
         page = self.client.get(f"/batches/{batch.pk}/return/")
         self.assertContains(page, "Anomalies")
@@ -329,6 +344,152 @@ class Vat3Tests(TestCase):
         self.assertEqual(page.content.decode().count('class="col"'), 12)
 
 
+class ReviewTests(TestCase):
+    def test_petrol_stays_out_of_t2(self):
+        batch = Batch.objects.create(status=Batch.CLASSIFIED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="fuel.pdf", file=pdf_upload("fuel.pdf"))
+        invoice.lines.create(
+            description="Petrol",
+            supplier="Green Fuel Oils",
+            invoice_number="GF-338",
+            invoice_date="2026-03-04",
+            currency="EUR",
+            net_amount="300.00",
+            vat_amount="69.00",
+            gross_amount="369.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+        )
+        invoice.lines.create(
+            description="Management consulting",
+            supplier="Harbour Consulting Ltd",
+            invoice_number="HC-1042",
+            invoice_date="2026-03-02",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="23.00",
+            gross_amount="123.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+        )
+        lines = batch_lines(batch)
+        self.client.post(f"/batches/{batch.pk}/vat/", formset_post(lines, CLASS_FIELDS, "mock_deduct"))
+        deduct = self.client.get(f"/batches/{batch.pk}/deduct/")
+        self.assertContains(deduct, "Blocked input")
+        self.assertContains(deduct, "Petrol")
+        self.assertContains(deduct, "Non-deductible")
+        response = complete_to_return(self.client, batch)
+        self.assertRedirects(response, f"/batches/{batch.pk}/return/")
+        petrol = invoice.lines.get(description="Petrol")
+        self.assertEqual(petrol.deductible, "none")
+        self.assertEqual(petrol.blocked_reason, "petrol")
+        self.assertEqual(petrol.deductible_vat, "0.00")
+        self.assertEqual(batch.vat_return.boxes["T1"], "0.00")
+        self.assertEqual(batch.vat_return.boxes["T2"], "23.00")
+
+    def test_override_is_the_review_record(self):
+        batch = Batch.objects.create(status=Batch.CLASSIFIED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
+        invoice.lines.create(
+            description="Management consulting",
+            supplier="Harbour Consulting Ltd",
+            invoice_number="HC-1042",
+            invoice_date="2026-03-02",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="23.00",
+            gross_amount="123.00",
+            category="standard",
+            rate="23%",
+            confidence=0.95,
+        )
+        lines = batch_lines(batch)
+        self.client.post(f"/batches/{batch.pk}/vat/", formset_post(lines, CLASS_FIELDS, "mock_deduct"))
+        line = invoice.lines.get()
+        self.assertEqual(line.model_deductible, "full")
+        response = self.client.post(
+            f"/batches/{batch.pk}/deduct/",
+            formset_post(
+                [line],
+                DEDUCT_FIELDS,
+                "accept",
+                overrides={(line.id, "deductible"): "none", (line.id, "blocked_reason"): "entertainment", (line.id, "deductible_percent"): "0"},
+            ),
+        )
+        self.assertRedirects(response, f"/batches/{batch.pk}/sign/")
+        line.refresh_from_db()
+        self.assertEqual(line.deductible, "none")
+        self.assertEqual(line.model_deductible, "full")
+        self.assertEqual(line.deductible_vat, "0.00")
+        event = AuditEvent.objects.get(kind="deduction_edited", payload__field="deductible")
+        self.assertEqual(event.payload["old"], "full")
+        self.assertEqual(event.payload["new"], "none")
+        page = self.client.get(f"/batches/{batch.pk}/sign/")
+        self.assertContains(page, "Human in the loop")
+        self.assertContains(page, "deductible full → none")
+        self.assertContains(page, "Deductibility overrides")
+        signed = self.client.post(
+            f"/batches/{batch.pk}/sign/",
+            {"action": "sign", "reviewer": "Alex Byrne", "note": "Blocked the entertainment.", "acknowledge": "on"},
+        )
+        self.assertRedirects(signed, f"/batches/{batch.pk}/return/")
+        self.assertEqual(SignOff.objects.get(batch=batch).reviewer, "Alex Byrne")
+        self.assertTrue(AuditEvent.objects.filter(kind="signed_off", payload__reviewer="Alex Byrne").exists())
+        prepared = self.client.get(f"/batches/{batch.pk}/return/")
+        self.assertContains(prepared, "Alex Byrne")
+        self.assertEqual(batch.vat_return.boxes["T2"], "0.00")
+
+    def test_signoff_needs_a_name(self):
+        batch = Batch.objects.create(status=Batch.DEDUCTION_ACCEPTED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
+        invoice.lines.create(
+            description="Management consulting",
+            supplier="Harbour Consulting Ltd",
+            invoice_number="HC-1042",
+            invoice_date="2026-03-02",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="23.00",
+            gross_amount="123.00",
+            category="standard",
+            deductible="full",
+            deductible_percent="100",
+            blocked_reason="none",
+            confidence=0.95,
+            deductibility_confidence=0.9,
+        )
+        response = self.client.post(f"/batches/{batch.pk}/sign/", {"action": "sign", "reviewer": "  "})
+        self.assertContains(response, "Sign with your name")
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, Batch.DEDUCTION_ACCEPTED)
+        self.assertFalse(SignOff.objects.filter(batch=batch).exists())
+
+    def test_blank_invoice_number_and_bad_vat_are_flagged(self):
+        line = SimpleNamespace(
+            id=1,
+            invoice_id=1,
+            description="Bad arithmetic",
+            low_confidence=False,
+            deductibility_low=False,
+            supplier="Acme Ltd",
+            invoice_number="",
+            invoice_date="2026-03-01",
+            currency="EUR",
+            net_amount="100.00",
+            vat_amount="10.00",
+            gross_amount="110.00",
+            category="standard",
+            deductible="",
+            blocked_reason="",
+        )
+        flags = line_flags(line)
+        self.assertIn("Invoice number is blank.", flags)
+        self.assertTrue(any("is not" in flag and "23" in flag for flag in flags))
+        self.assertFalse(any("Low confidence" in flag for flag in flags))
+
+
 class LoaderTests(TestCase):
     def test_step_changes_wait_and_save_does_not(self):
         home = self.client.get("/")
@@ -353,9 +514,24 @@ class LoaderTests(TestCase):
         batch.save(update_fields=["status"])
         invoice.lines.update(category="standard", confidence=0.95)
         vat = self.client.get(f"/batches/{batch.pk}/vat/").content.decode()
-        self.assertIn('data-step="return"', vat)
+        self.assertIn('data-step="deduct"', vat)
         self.assertNotIn("data-wait", _button(vat, "save"))
         self.assertIn("data-wait", _button(vat, "accept"))
+        self.assertIn("data-wait", _button(vat, "mock_deduct"))
+
+        batch.status = Batch.DEDUCTIBILITY
+        batch.save(update_fields=["status"])
+        invoice.lines.update(deductible="full", deductible_percent="100", blocked_reason="none")
+        deduct = self.client.get(f"/batches/{batch.pk}/deduct/").content.decode()
+        self.assertIn('data-step="signoff"', deduct)
+        self.assertNotIn("data-wait", _button(deduct, "save"))
+        self.assertIn("data-wait", _button(deduct, "accept"))
+
+        batch.status = Batch.DEDUCTION_ACCEPTED
+        batch.save(update_fields=["status"])
+        sign = self.client.get(f"/batches/{batch.pk}/sign/").content.decode()
+        self.assertIn('data-step="return"', sign)
+        self.assertIn("data-wait", _button(sign, "sign"))
 
 
 def _button(html, value):

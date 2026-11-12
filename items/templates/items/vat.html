@@ -2,31 +2,54 @@
 {% block title %}Review VAT{% endblock %}
 {% block heading %}Review the VAT treatment{% endblock %}
 {% block body %}
-  <p class="lede">Highlighted rows are below the confidence threshold. Change the category if the suggestion is wrong, then prepare the return.</p>
-  <form method="post" data-step="return">
+  <p class="lede">The chain is the model’s reasoning. The selects are yours. A difference is stored as an override. Highlighted rows are below the confidence threshold.</p>
+  {% if flags %}
+  <section class="card anomaly" style="margin-bottom: 1rem;">
+    <h2>Flags</h2>
+    <ul>
+      {% for flag in flags %}
+      <li>{{ flag.description }} — {{ flag.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <form method="post" data-step="deduct">
     {% csrf_token %}
     {{ formset.management_form }}
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>File</th><th>Description</th><th>Net</th><th>VAT</th><th>Category</th><th>Confidence</th><th>Reason</th>
+            <th>Line</th><th>Amounts</th><th>Conclusion</th><th>Chain</th>
           </tr>
         </thead>
         <tbody>
           {% for form, line in rows %}
           <tr class="{% if line.low_confidence %}flag{% endif %}">
-            <td>{{ form.id }}<span class="muted">{{ line.invoice.original_name }}</span></td>
-            <td>{{ line.description }}</td>
-            <td class="num">{{ line.net_amount }}</td>
-            <td class="num">{{ line.vat_amount }}</td>
+            <td>
+              {{ form.id }}
+              <div class="muted">{{ line.invoice.original_name }}</div>
+              <div>{{ line.description }}</div>
+            </td>
+            <td class="num">Net {{ line.net_amount }}<br>VAT {{ line.vat_amount }}</td>
             <td>
               {{ form.category }}
               {% if line.low_confidence %}<div><span class="pill">Low confidence</span></div>{% endif %}
+              {% if line.classification_overridden %}<div><span class="pill">Overridden</span></div>{% endif %}
               {% if line.classification_error %}<div class="error">{{ line.classification_error }}</div>{% endif %}
+              <div class="muted">{{ line.reason }}</div>
+              <div class="num">{% if line.confidence is not None %}{{ line.confidence }}{% endif %}</div>
             </td>
-            <td class="num">{% if line.confidence is not None %}{{ line.confidence }}{% endif %}</td>
-            <td>{{ line.reason }}</td>
+            <td>
+              <ol class="reason-chain">
+                {% for step in line.classification_chain %}
+                <li><span class="code">{{ step.step }}</span> {{ step.finding }}<div class="muted">{{ step.because }}</div></li>
+                {% empty %}
+                <li class="muted">No chain was returned.</li>
+                {% endfor %}
+              </ol>
+              <div class="subs">{{ form.supply }}{{ form.nature }}{{ form.place_of_supply }}{{ form.who_accounts }}</div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -38,9 +61,14 @@
       {% if missing_category %}
         <span class="error">Choose a category for every line before accepting.</span>
       {% else %}
-        <button type="submit" data-wait name="action" value="accept">Prepare the return</button>
+        <button type="submit" data-wait name="action" value="accept">Assess deductibility</button>
+        <button type="submit" data-wait class="secondary" name="action" value="mock_deduct">Mock deductibility</button>
       {% endif %}
     </div>
+    {% elif batch.status == "deductibility" %}
+    <p><a class="button" href="{% url 'batch_deduct' batch.pk %}">Review non-deductible VAT</a></p>
+    {% elif batch.status == "deduction_accepted" %}
+    <p><a class="button" href="{% url 'batch_signoff' batch.pk %}">Go to sign-off</a></p>
     {% elif batch.status == "return_ready" %}
     <p><a class="button" href="{% url 'batch_return' batch.pk %}">Open the VAT return</a></p>
     {% endif %}

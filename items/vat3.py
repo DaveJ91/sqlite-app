@@ -38,15 +38,11 @@ def vat3_boxes(lines):
     es2 = Decimal("0.00")
     for line in lines:
         category = getattr(line, "category", "")
-        if category in INPUT_VAT:
-            t2 += parse_amount(line.vat_amount)
-        elif category == "reverse_charge":
-            notional = parse_amount(line.vat_amount)
-            if notional == 0:
-                notional = (parse_amount(line.net_amount) * STANDARD_RATE).quantize(Decimal("0.01"))
+        if category == "reverse_charge":
+            notional = _notional_vat(line)
             t1 += notional
-            t2 += notional
             es2 += parse_amount(line.net_amount)
+        t2 += recoverable_input_vat(line)
     boxes = _finish(t1, t2)
     boxes["ES2"] = format_amount(es2)
     return boxes
@@ -185,6 +181,54 @@ def shift_month(day, offset):
     year = day.year + month_index // 12
     month = month_index % 12 + 1
     return date(year, month, 1)
+
+
+def recoverable_input_vat(line):
+    """VAT for T2. A blank deductibility decision keeps the old purchase treatment."""
+    code = getattr(line, "deductible", "") or ""
+    stated = getattr(line, "deductible_vat", None)
+    if code == "none":
+        return Decimal("0.00")
+    if code in {"full", "partial"} and stated not in (None, ""):
+        return parse_amount(stated)
+    if code == "partial":
+        percent = parse_amount(getattr(line, "deductible_percent", "") or "0")
+        return (_chargeable_vat(line) * percent / Decimal("100")).quantize(Decimal("0.01"))
+    if code == "full":
+        return _chargeable_vat(line)
+    category = getattr(line, "category", "")
+    if category in INPUT_VAT:
+        return parse_amount(getattr(line, "vat_amount", ""))
+    if category == "reverse_charge":
+        return _notional_vat(line)
+    return Decimal("0.00")
+
+
+def recovery_from_decision(line):
+    """Recompute the recoverable amount from the human's current decision."""
+    if line.deductible == "none":
+        return Decimal("0.00")
+    base = _chargeable_vat(line)
+    if line.deductible == "partial":
+        percent = parse_amount(line.deductible_percent or "0")
+        return (base * percent / Decimal("100")).quantize(Decimal("0.01"))
+    return base
+
+
+def _chargeable_vat(line):
+    category = getattr(line, "category", "")
+    if category == "reverse_charge":
+        return _notional_vat(line)
+    if category in INPUT_VAT or (getattr(line, "deductible", "") or "") in {"full", "partial"}:
+        return parse_amount(getattr(line, "vat_amount", ""))
+    return Decimal("0.00")
+
+
+def _notional_vat(line):
+    amount = parse_amount(getattr(line, "vat_amount", ""))
+    if amount == 0:
+        amount = (parse_amount(getattr(line, "net_amount", "")) * STANDARD_RATE).quantize(Decimal("0.01"))
+    return amount
 
 
 def _finish(t1, t2):

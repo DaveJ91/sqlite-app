@@ -1,0 +1,69 @@
+{% extends "items/base.html" %}
+{% block title %}Sign off{% endblock %}
+{% block heading %}Sign the working paper{% endblock %}
+{% block body %}
+  <p class="lede">There is no login on this desk. The name you type is the human review. The trail below is what was extracted, what the model said, and what a person changed.</p>
+
+  <section class="card" style="margin-bottom: 1rem;">
+    <h2>Human in the loop</h2>
+    <ul class="batch-list">
+      <li><span>Extraction edits</span><span class="num">{{ evidence.extraction_edits }}</span></li>
+      <li><span>Classification overrides</span><span class="num">{{ evidence.classification_overrides }}</span></li>
+      <li><span>Deductibility overrides</span><span class="num">{{ evidence.deductibility_overrides }}</span></li>
+    </ul>
+    {% if evidence.overrides %}
+    <ul>
+      {% for row in evidence.overrides %}
+      <li><strong>{{ row.description }}</strong> — {{ row.changes|join:", " }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No line was changed after the model. Acceptance is still a review.</p>
+    {% endif %}
+  </section>
+
+  {% if flags %}
+  <section class="card anomaly" style="margin-bottom: 1rem;">
+    <h2>Open flags</h2>
+    <ul>
+      {% for flag in flags %}
+      <li>{{ flag.description }} — {{ flag.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="muted">No arithmetic, invoice, or blocked-input flags are open.</p>
+  {% endif %}
+
+  <h2>Audit trail</h2>
+  <ul class="batch-list">
+    {% for event in evidence.events %}
+    <li>
+      <span>{{ event.kind }}</span>
+      <span class="muted">{{ event.created|date:"Y-m-d H:i:s" }} · {{ event.payload }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if batch.status == "deduction_accepted" %}
+  <form method="post" data-step="return" style="margin-top: 1.2rem;">
+    {% csrf_token %}
+    <p><input type="text" name="reviewer" placeholder="Your name" required></p>
+    <p><textarea name="note" rows="3" placeholder="What you checked, and anything you overrode"></textarea></p>
+    {% if flags %}
+    <p><label><input type="checkbox" name="acknowledge" value="on"> I have reviewed every flag.</label></p>
+    {% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <div class="actions">
+      <button type="submit" data-wait name="action" value="sign">Sign and prepare the return</button>
+    </div>
+  </form>
+  {% elif sign_off %}
+  <section class="card" style="margin-top: 1rem;">
+    <h2>Signed</h2>
+    <p>{{ sign_off.reviewer }} · {{ sign_off.created|date:"Y-m-d H:i" }}</p>
+    {% if sign_off.note %}<p>{{ sign_off.note }}</p>{% endif %}
+    <p><a class="button" href="{% url 'batch_return' batch.pk %}">Open the VAT return</a></p>
+  </section>
+  {% endif %}
+{% endblock %}

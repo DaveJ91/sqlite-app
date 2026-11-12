@@ -6,11 +6,15 @@ class Batch(models.Model):
     EXTRACTED = "extracted"
     EXTRACTION_ACCEPTED = "extraction_accepted"
     CLASSIFIED = "classified"
+    DEDUCTIBILITY = "deductibility"
+    DEDUCTION_ACCEPTED = "deduction_accepted"
     RETURN_READY = "return_ready"
     STATUS_CHOICES = [
         (EXTRACTED, "Review extraction"),
         (EXTRACTION_ACCEPTED, "Classifying"),
         (CLASSIFIED, "Review VAT"),
+        (DEDUCTIBILITY, "Review deductibility"),
+        (DEDUCTION_ACCEPTED, "Sign off"),
         (RETURN_READY, "VAT return"),
     ]
 
@@ -60,6 +64,27 @@ class InvoiceLine(models.Model):
     confidence = models.FloatField(null=True, blank=True)
     reason = models.TextField(blank=True)
     classification_error = models.TextField(blank=True)
+    supply = models.CharField(max_length=16, blank=True)
+    nature = models.CharField(max_length=16, blank=True)
+    place_of_supply = models.CharField(max_length=16, blank=True)
+    who_accounts = models.CharField(max_length=16, blank=True)
+    classification_chain = models.JSONField(default=list, blank=True)
+    model_category = models.CharField(max_length=32, blank=True)
+    model_supply = models.CharField(max_length=16, blank=True)
+    model_nature = models.CharField(max_length=16, blank=True)
+    model_place = models.CharField(max_length=16, blank=True)
+    model_who = models.CharField(max_length=16, blank=True)
+    deductible = models.CharField(max_length=16, blank=True)
+    deductible_percent = models.CharField(max_length=16, blank=True)
+    deductible_vat = models.CharField(max_length=32, blank=True)
+    blocked_reason = models.CharField(max_length=32, blank=True)
+    deductibility_chain = models.JSONField(default=list, blank=True)
+    deductibility_confidence = models.FloatField(null=True, blank=True)
+    deductibility_reason = models.TextField(blank=True)
+    deductibility_error = models.TextField(blank=True)
+    model_deductible = models.CharField(max_length=16, blank=True)
+    model_blocked = models.CharField(max_length=32, blank=True)
+    model_percent = models.CharField(max_length=16, blank=True)
 
     class Meta:
         ordering = ["invoice_id", "id"]
@@ -71,6 +96,39 @@ class InvoiceLine(models.Model):
         if self.confidence is None:
             return False
         return self.confidence < float(settings.VAT_LOW_CONFIDENCE)
+
+    @property
+    def deductibility_low(self):
+        if self.deductibility_error:
+            return True
+        if self.deductibility_confidence is None:
+            return False
+        return self.deductibility_confidence < float(settings.VAT_LOW_CONFIDENCE)
+
+    @property
+    def classification_overridden(self):
+        return _differs(
+            (self.model_category, self.category),
+            (self.model_supply, self.supply),
+            (self.model_nature, self.nature),
+            (self.model_place, self.place_of_supply),
+            (self.model_who, self.who_accounts),
+        )
+
+    @property
+    def deductibility_overridden(self):
+        return _differs(
+            (self.model_deductible, self.deductible),
+            (self.model_blocked, self.blocked_reason),
+            (self.model_percent, self.deductible_percent),
+        )
+
+
+def _differs(*pairs):
+    for original, current in pairs:
+        if original and original != current:
+            return True
+    return False
 
 
 class AuditEvent(models.Model):
@@ -93,10 +151,12 @@ class VatReturn(models.Model):
 class VatRun(models.Model):
     EXTRACT = "extract"
     CLASSIFY = "classify"
+    DEDUCT = "deduct"
     RETURN = "return"
     KIND_CHOICES = [
         (EXTRACT, "Extract"),
         (CLASSIFY, "Classify"),
+        (DEDUCT, "Deduct"),
         (RETURN, "Return"),
     ]
 
@@ -113,3 +173,19 @@ class VatRun(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.period_label or self.pk}"
+
+
+class SignOff(models.Model):
+    batch = models.OneToOneField(Batch, related_name="sign_off", on_delete=models.CASCADE)
+    reviewer = models.CharField(max_length=120)
+    note = models.TextField(blank=True)
+    acknowledged = models.BooleanField(default=False)
+    flag_count = models.PositiveIntegerField(default=0)
+    flags = models.JSONField(default=list, blank=True)
+    extraction_edits = models.PositiveIntegerField(default=0)
+    classification_overrides = models.PositiveIntegerField(default=0)
+    deductibility_overrides = models.PositiveIntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.reviewer} on batch {self.batch_id}"

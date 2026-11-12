@@ -10,10 +10,15 @@ from .httpapi import (
 )
 from .vat import RATES
 
-CLASSIFY_PROMPT = """Classify Irish VAT for each invoice line. Return only JSON:
-{"lines":[{"line_id":1,"category":"standard","confidence":0.9,"reason":""}]}
+CLASSIFY_PROMPT = """Classify Irish VAT for each invoice line and show the chain. Return only JSON:
+{"lines":[{"line_id":1,"supply":"taxable","nature":"service","place":"ireland","who_accounts":"supplier","category":"standard","confidence":0.9,"reason":"","chain":[{"step":"Supply","finding":"","because":""},{"step":"Nature","finding":"","because":""},{"step":"Place of supply","finding":"","because":""},{"step":"Rate","finding":"","because":""},{"step":"Who accounts","finding":"","because":""}]}]}
 category must be one of: standard, reduced, second_reduced, livestock, zero, exempt, reverse_charge, outside_scope.
+supply is taxable, exempt, outside, or none.
+nature is good or service.
+place is ireland, eu, or non_eu.
+who_accounts is supplier, customer, or none.
 confidence is a number from 0 to 1.
+The chain must show whether there is a supply, whether it is a good or a service, the place of supply, the rate, and who accounts for the VAT.
 Use the amounts and descriptions provided. Do not invent lines.
 """
 
@@ -90,11 +95,33 @@ def normalize_classification(payload):
                 "confidence": confidence,
                 "reason": str(row.get("reason") or ""),
                 "error": "" if category in RATES else "Unknown VAT category.",
+                "supply": str(row.get("supply") or ""),
+                "nature": str(row.get("nature") or ""),
+                "place": str(row.get("place") or ""),
+                "who_accounts": str(row.get("who_accounts") or ""),
+                "chain": _chain(row.get("chain")),
             }
         )
     if not cleaned:
         raise ClientError("VAT classification returned no lines.")
     return cleaned
+
+
+def _chain(value):
+    if not isinstance(value, list):
+        return []
+    steps = []
+    for step in value:
+        if not isinstance(step, dict):
+            continue
+        steps.append(
+            {
+                "step": str(step.get("step") or ""),
+                "finding": str(step.get("finding") or ""),
+                "because": str(step.get("because") or ""),
+            }
+        )
+    return steps
 
 
 def _json(payload):

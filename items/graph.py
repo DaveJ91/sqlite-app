@@ -9,12 +9,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from .classify import classify_lines
+from .deduct import deduct_lines
 from .httpapi import ClientError
-from .mocks import mock_classification, mock_invoice
+from .mocks import mock_classification, mock_deductibility, mock_invoice
 from .models import AuditEvent, Batch, InvoiceLine, VatReturn, VatRun
 from .understanding import understand_invoice
 from .vat import LABELS, RATES, format_amount, parse_amount
-from .vat3 import period_date_from_label, vat3_boxes
+from .vat3 import period_date_from_label, recovery_from_decision, vat3_boxes
 
 
 class GraphState(TypedDict):
@@ -108,12 +109,25 @@ def classify_batch(state: GraphState) -> GraphState:
             line.category = ""
             line.rate = ""
             line.reason = row["reason"]
+            line.classification_chain = row.get("chain") or []
         else:
             line.classification_error = ""
             line.category = row["category"]
             line.rate = RATES[row["category"]]
             line.confidence = row["confidence"]
             line.reason = row["reason"]
+            line.supply = row.get("supply") or ""
+            line.nature = row.get("nature") or ""
+            line.place_of_supply = row.get("place") or ""
+            line.who_accounts = row.get("who_accounts") or ""
+            line.classification_chain = row.get("chain") or [
+                {"step": "Rate", "finding": LABELS.get(line.category, line.category), "because": line.reason}
+            ]
+            line.model_category = line.category
+            line.model_supply = line.supply
+            line.model_nature = line.nature
+            line.model_place = line.place_of_supply
+            line.model_who = line.who_accounts
         if line.low_confidence:
             low += 1
         line.save()
@@ -129,6 +143,69 @@ def classify_batch(state: GraphState) -> GraphState:
         VatRun.CLASSIFY,
         bool(state.get("mock")),
         {"line_count": len(lines), "low_confidence_count": low},
+    )
+    return state
+
+
+def assess_deductibility(state: GraphState) -> GraphState:
+    batch = Batch.objects.get(pk=state["batch_id"])
+    lines = list(InvoiceLine.objects.filter(invoice__batch=batch))
+    if state.get("mock"):
+        assessed = mock_deductibility(lines)
+    else:
+        assessed = deduct_lines(lines)
+    by_id = {row["line_id"]: row for row in assessed}
+    low = 0
+    blocked = 0
+    for line in lines:
+        row = by_id.get(line.id)
+        if row is None:
+            line.deductibility_error = "This line was missing from the deductibility response."
+            line.deductibility_confidence = 0
+            line.deductible = ""
+            line.deductible_percent = ""
+            line.blocked_reason = ""
+            line.deductible_vat = ""
+            line.deductibility_reason = ""
+            line.deductibility_chain = []
+        elif row["error"]:
+            line.deductibility_error = row["error"]
+            line.deductibility_confidence = row["confidence"]
+            line.deductible = ""
+            line.deductible_percent = ""
+            line.blocked_reason = ""
+            line.deductible_vat = ""
+            line.deductibility_reason = row["reason"]
+            line.deductibility_chain = row.get("chain") or []
+        else:
+            line.deductibility_error = ""
+            line.deductible = row["deductible"]
+            line.deductible_percent = row["deductible_percent"]
+            line.blocked_reason = row["blocked_reason"]
+            line.deductibility_confidence = row["confidence"]
+            line.deductibility_reason = row["reason"]
+            line.deductibility_chain = row.get("chain") or []
+            line.deductible_vat = format_amount(recovery_from_decision(line))
+            line.model_deductible = line.deductible
+            line.model_blocked = line.blocked_reason
+            line.model_percent = line.deductible_percent
+        if line.deductibility_low:
+            low += 1
+        if line.deductible == "none":
+            blocked += 1
+        line.save()
+    batch.status = Batch.DEDUCTIBILITY
+    batch.save(update_fields=["status"])
+    _event(
+        batch,
+        "deductibility_assessed",
+        {"line_count": len(lines), "non_deductible": blocked, "low_confidence_count": low, "mock": bool(state.get("mock"))},
+    )
+    _record_run(
+        batch,
+        VatRun.DEDUCT,
+        bool(state.get("mock")),
+        {"line_count": len(lines), "non_deductible": blocked, "low_confidence_count": low},
     )
     return state
 
@@ -198,6 +275,7 @@ def _compile(checkpointer):
     graph = StateGraph(GraphState)
     graph.add_node("extract_batch", extract_batch)
     graph.add_node("classify_batch", classify_batch)
+    graph.add_node("assess_deductibility", assess_deductibility)
     graph.add_node("prepare_return", prepare_return)
     graph.add_conditional_edges(
         START,
@@ -205,11 +283,13 @@ def _compile(checkpointer):
         {
             "extract": "extract_batch",
             "classify": "classify_batch",
+            "deduct": "assess_deductibility",
             "return": "prepare_return",
         },
     )
     graph.add_edge("extract_batch", END)
     graph.add_edge("classify_batch", END)
+    graph.add_edge("assess_deductibility", END)
     graph.add_edge("prepare_return", END)
     return graph.compile(checkpointer=checkpointer)
 

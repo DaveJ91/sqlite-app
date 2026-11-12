@@ -138,9 +138,29 @@
     }
     .folio-body { padding-left: 0.85rem; }
     .scene { height: 248px; display: grid; place-items: center; margin-bottom: 0.2rem; }
+    .reason-chain { margin: 0; padding-left: 1.1rem; }
+    .reason-chain li { margin: 0.35rem 0; }
+    .subs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.45rem; }
+    .subs select { width: auto; min-width: 7rem; }
     .stage[data-scene="load"] .scene:not(.load),
     .stage[data-scene="classify"] .scene:not(.classify),
+    .stage[data-scene="deduct"] .scene:not(.deduct),
+    .stage[data-scene="signoff"] .scene:not(.signoff),
     .stage[data-scene="return"] .scene:not(.return) { display: none; }
+    .split { display: flex; gap: 0.8rem; align-items: flex-end; }
+    .pile { width: 120px; text-align: center; }
+    .pile b {
+      display: inline-block; margin-top: 0.4rem; font-size: 0.72rem; letter-spacing: 0.08em;
+      border: 1.5px solid var(--teal); color: var(--teal); border-radius: 8px; padding: 0.35rem 0.5rem;
+      animation: stamp 0.6s cubic-bezier(.2, 1.4, .4, 1) both;
+    }
+    .pile.stop b { border-color: var(--amber-ink); color: var(--amber-ink); animation-delay: 0.45s; }
+    .sig { width: 220px; height: 70px; }
+    .sig path {
+      fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round;
+      stroke-dasharray: 240; stroke-dashoffset: 240; animation: draw 2.4s ease forwards;
+    }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
     .stack { position: relative; width: 230px; height: 170px; }
     .paper {
       position: absolute; left: 24px; width: 180px; height: 128px;
@@ -288,6 +308,17 @@
             <div class="hub">Rates</div>
           </div>
         </div>
+        <div class="scene deduct" aria-hidden="true">
+          <div class="split">
+            <div class="pile"><div class="paper front" style="position: relative; left: 0; top: 0; width: 120px; height: 78px;"></div><b>KEEP</b></div>
+            <div class="pile stop"><div class="paper front" style="position: relative; left: 0; top: 0; width: 120px; height: 78px;"></div><b>BLOCK</b></div>
+          </div>
+        </div>
+        <div class="scene signoff" aria-hidden="true">
+          <svg class="sig" viewBox="0 0 220 70" aria-hidden="true">
+            <path d="M8 48 C 30 48, 28 18, 52 28 S 78 62, 96 40 S 120 12, 142 36 170 58, 208 22"></path>
+          </svg>
+        </div>
         <div class="scene return" aria-hidden="true">
           <div>
             <div class="stamps">
@@ -318,6 +349,16 @@
           kicker: "Classifying",
           title: "Sorting every line into a rate",
           lines: ["Laying the Irish rates in a ring", "Reading what each line bought", "Amber marks the ones to check", "Handing you the draft"]
+        },
+        deduct: {
+          kicker: "Deductibility",
+          title: "Separating what you can reclaim",
+          lines: ["Reading the blocked-input list", "Holding petrol, food, and cars", "Keeping the taxable-business VAT", "The review is ready"]
+        },
+        signoff: {
+          kicker: "Sign-off",
+          title: "Writing the review into the file",
+          lines: ["Lining up every override", "Counting the open flags", "Waiting for your name", "Then the VAT3 is prepared"]
         },
         return: {
           kicker: "VAT3",

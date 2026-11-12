@@ -54,15 +54,81 @@ class LineForm(forms.ModelForm):
 
 class ClassificationForm(forms.ModelForm):
     category = forms.ChoiceField(choices=[("", "Choose")] + [(key, label) for key, label in LABELS.items()])
+    supply = forms.ChoiceField(
+        required=False,
+        choices=[
+            ("", "Supply"),
+            ("taxable", "Taxable supply"),
+            ("exempt", "Exempt"),
+            ("outside", "Outside the scope"),
+            ("none", "No supply"),
+        ],
+    )
+    nature = forms.ChoiceField(
+        required=False,
+        choices=[("", "Good or service"), ("good", "Good"), ("service", "Service")],
+    )
+    place_of_supply = forms.ChoiceField(
+        required=False,
+        choices=[("", "Place"), ("ireland", "Ireland"), ("eu", "Other EU"), ("non_eu", "Outside the EU")],
+    )
+    who_accounts = forms.ChoiceField(
+        required=False,
+        choices=[("", "Who accounts"), ("supplier", "Supplier"), ("customer", "Customer"), ("none", "No VAT")],
+    )
 
     class Meta:
         model = InvoiceLine
-        fields = ["category"]
+        fields = ["category", "supply", "nature", "place_of_supply", "who_accounts"]
+
+
+class DeductibilityForm(forms.ModelForm):
+    deductible = forms.ChoiceField(
+        choices=[
+            ("", "Choose"),
+            ("full", "Fully deductible"),
+            ("partial", "Partial"),
+            ("none", "Non-deductible"),
+        ]
+    )
+    blocked_reason = forms.ChoiceField(
+        required=False,
+        choices=[
+            ("", "Blocked input"),
+            ("none", "Not blocked"),
+            ("food", "Food or drink"),
+            ("accommodation", "Accommodation"),
+            ("entertainment", "Entertainment"),
+            ("personal", "Other personal services"),
+            ("petrol", "Petrol"),
+            ("passenger_car", "Passenger car"),
+            ("exempt_use", "Exempt use"),
+            ("non_business", "Non-business"),
+            ("no_vat", "No VAT on the invoice"),
+        ],
+    )
+    deductible_percent = forms.CharField(required=False)
+
+    class Meta:
+        model = InvoiceLine
+        fields = ["deductible", "blocked_reason", "deductible_percent"]
+
+    def clean_deductible_percent(self):
+        raw = (self.cleaned_data.get("deductible_percent") or "").strip()
+        if not raw:
+            return ""
+        from decimal import Decimal
+
+        from .vat import parse_amount
+
+        amount = parse_amount(raw)
+        if amount < 0 or amount > Decimal("100"):
+            raise forms.ValidationError("Use a percentage from 0 to 100.")
+        if amount == amount.to_integral():
+            return str(int(amount))
+        return f"{amount.quantize(Decimal('0.01'))}"
 
 
 LineFormSet = modelformset_factory(InvoiceLine, form=LineForm, extra=0)
-ClassificationFormSet = modelformset_factory(
-    InvoiceLine,
-    form=ClassificationForm,
-    extra=0,
-)
+ClassificationFormSet = modelformset_factory(InvoiceLine, form=ClassificationForm, extra=0)
+DeductibilityFormSet = modelformset_factory(InvoiceLine, form=DeductibilityForm, extra=0)

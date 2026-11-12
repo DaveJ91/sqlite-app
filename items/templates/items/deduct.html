@@ -1,0 +1,76 @@
+{% extends "items/base.html" %}
+{% block title %}Deductibility{% endblock %}
+{% block heading %}Review non-deductible VAT{% endblock %}
+{% block body %}
+  <p class="lede">T2 only keeps the VAT this step allows. Petrol, entertainment, hotels, and most food stay out. A qualifying car is 20% until you confirm it. The chain is the model. The selects are yours.</p>
+  {% if flags %}
+  <section class="card anomaly" style="margin-bottom: 1rem;">
+    <h2>Flags</h2>
+    <ul>
+      {% for flag in flags %}
+      <li>{{ flag.description }} — {{ flag.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <form method="post" data-step="signoff">
+    {% csrf_token %}
+    {{ formset.management_form }}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Line</th><th>VAT</th><th>Decision</th><th>Chain</th></tr>
+        </thead>
+        <tbody>
+          {% for form, line in rows %}
+          <tr class="{% if line.deductibility_low or line.deductible == 'none' %}flag{% endif %}">
+            <td>
+              {{ form.id }}
+              <div class="muted">{{ line.invoice.original_name }}</div>
+              <div>{{ line.description }}</div>
+              <div class="muted">{{ line.rate }}</div>
+            </td>
+            <td class="num">
+              Charged {{ line.vat_amount }}<br>
+              Recoverable {{ line.deductible_vat }}
+            </td>
+            <td>
+              {{ form.deductible }}
+              {{ form.blocked_reason }}
+              <label class="muted">Percent {{ form.deductible_percent }}</label>
+              {% if line.deductibility_low %}<div><span class="pill">Low confidence</span></div>{% endif %}
+              {% if line.deductibility_overridden %}<div><span class="pill">Overridden</span></div>{% endif %}
+              {% if line.deductible == "none" %}<div><span class="pill">Non-deductible</span></div>{% endif %}
+              {% if line.deductibility_error %}<div class="error">{{ line.deductibility_error }}</div>{% endif %}
+              <div class="muted">{{ line.deductibility_reason }}</div>
+            </td>
+            <td>
+              <ol class="reason-chain">
+                {% for step in line.deductibility_chain %}
+                <li><span class="code">{{ step.step }}</span> {{ step.finding }}<div class="muted">{{ step.because }}</div></li>
+                {% empty %}
+                <li class="muted">No chain was returned.</li>
+                {% endfor %}
+              </ol>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if batch.status == "deductibility" %}
+    <div class="actions">
+      <button type="submit" class="secondary" name="action" value="save">Save deductibility</button>
+      {% if incomplete %}
+        <span class="error">Choose full, partial, or non-deductible for every line. Partial needs a percentage.</span>
+      {% else %}
+        <button type="submit" data-wait name="action" value="accept">Accept deductibility</button>
+      {% endif %}
+    </div>
+    {% elif batch.status == "deduction_accepted" %}
+    <p><a class="button" href="{% url 'batch_signoff' batch.pk %}">Go to sign-off</a></p>
+    {% elif batch.status == "return_ready" %}
+    <p><a class="button" href="{% url 'batch_return' batch.pk %}">Open the VAT return</a></p>
+    {% endif %}
+  </form>
+{% endblock %}

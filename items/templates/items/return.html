@@ -2,7 +2,16 @@
 {% block title %}VAT3 return{% endblock %}
 {% block heading %}Irish VAT3 working paper{% endblock %}
 {% block body %}
-  <p class="lede">Purchase invoices only, so T1 is reverse-charge VAT. Enter zeros on the form, not the word nil. This page does not file anything with Revenue.</p>
+  <p class="lede">Purchase invoices only, so T1 is reverse-charge VAT. T2 is the VAT the deductibility review allowed. Enter zeros on the form, not the word nil. This page does not file anything with Revenue.</p>
+  {% if sign_off %}
+  <section class="card" style="margin-bottom: 1rem;">
+    <h2>Signed off</h2>
+    <p>{{ sign_off.reviewer }} · {{ sign_off.created|date:"Y-m-d H:i" }}{% if sign_off.acknowledged %} · flags acknowledged{% endif %}</p>
+    {% if sign_off.note %}<p>{{ sign_off.note }}</p>{% endif %}
+    <p class="muted">{{ sign_off.extraction_edits }} extraction edit{{ sign_off.extraction_edits|pluralize }} · {{ sign_off.classification_overrides }} classification override{{ sign_off.classification_overrides|pluralize }} · {{ sign_off.deductibility_overrides }} deductibility override{{ sign_off.deductibility_overrides|pluralize }} · {{ sign_off.flag_count }} flag{{ sign_off.flag_count|pluralize }} at sign-off.</p>
+    <p><a href="{% url 'batch_signoff' batch.pk %}">Open the review record</a></p>
+  </section>
+  {% endif %}
 
   <section class="card verdict">
     <div>
