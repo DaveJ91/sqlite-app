@@ -13,7 +13,7 @@ TITLES = {
 }
 
 
-def workspace_plan(batch):
+def workspace_plan(batch, dashboard=False):
     if batch is None:
         done = set()
         current = "load"
@@ -31,11 +31,13 @@ def workspace_plan(batch):
         "review": "Edit a cell if the reading is wrong",
         "classify": "Live API, or a random mock",
         "vat": _vat_detail(batch, counts),
-        "return": "Totals by rate, with every source line",
+        "return": "VAT3 boxes, payment or refund, last 12 months",
     }
     steps = []
     for key in STEPS:
-        if current is None or (key in done and key != current):
+        if dashboard:
+            state = "todo"
+        elif current is None or (key in done and key != current):
             state = "done"
         elif key == current:
             state = "current"
@@ -50,7 +52,10 @@ def workspace_plan(batch):
                 "href": _href(batch, key, done, current),
             }
         )
-    if current is None:
+    if dashboard:
+        kicker = "Overview"
+        current_title = "Dashboard"
+    elif current is None:
         kicker = "Complete"
         current_title = "VAT return"
     else:

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatReturn
+from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatReturn, VatRun
 
 
 class InvoiceInline(admin.TabularInline):
@@ -17,3 +17,9 @@ class BatchAdmin(admin.ModelAdmin):
 admin.site.register(InvoiceLine)
 admin.site.register(AuditEvent)
 admin.site.register(VatReturn)
+
+
+@admin.register(VatRun)
+class VatRunAdmin(admin.ModelAdmin):
+    list_display = ("id", "kind", "period_label", "period_date", "mock", "batch", "created")
+    list_filter = ("kind", "mock")

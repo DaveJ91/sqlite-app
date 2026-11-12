@@ -3,7 +3,7 @@
 {% block heading %}Review the VAT treatment{% endblock %}
 {% block body %}
   <p class="lede">Highlighted rows are below the confidence threshold. Change the category if the suggestion is wrong, then prepare the return.</p>
-  <form method="post">
+  <form method="post" data-step="return">
     {% csrf_token %}
     {{ formset.management_form }}
     <div class="table-wrap">
@@ -38,7 +38,7 @@
       {% if missing_category %}
         <span class="error">Choose a category for every line before accepting.</span>
       {% else %}
-        <button type="submit" name="action" value="accept">Prepare the return</button>
+        <button type="submit" data-wait name="action" value="accept">Prepare the return</button>
       {% endif %}
     </div>
     {% elif batch.status == "return_ready" %}

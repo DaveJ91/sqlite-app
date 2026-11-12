@@ -1,8 +1,12 @@
 import random
+from datetime import datetime, time
 from decimal import Decimal
 
-from .models import AuditEvent, Batch, Invoice, InvoiceLine
+from django.utils import timezone
+
+from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatRun
 from .vat import RATES
+from .vat3 import payment_boxes, period_date_from_label, shift_month
 
 # Ten suppliers, five lines each. Fifty rows, no files required.
 _CATALOG = [
@@ -205,7 +209,74 @@ def seed_mock_batch(period_label=""):
         kind="extracted",
         payload={"ok": True, "source": "mock", "line_count": total, "files": 0},
     )
+    VatRun.objects.create(
+        batch=batch,
+        kind=VatRun.EXTRACT,
+        period_label=batch.period_label,
+        period_date=period_date_from_label(batch.period_label),
+        mock=True,
+        payload={"ok": True, "source": "mock", "line_count": total, "files": 0},
+    )
+    seed_return_history()
     return batch
+
+
+# Twelve ordinary payment months. A purchase-heavy return should look odd beside them.
+_HISTORY = (
+    ("4600.00", "1900.00"),
+    ("4700.00", "2000.00"),
+    ("4550.00", "1850.00"),
+    ("4900.00", "2100.00"),
+    ("4800.00", "2050.00"),
+    ("5000.00", "2200.00"),
+    ("4750.00", "1980.00"),
+    ("4650.00", "1920.00"),
+    ("4850.00", "2070.00"),
+    ("5100.00", "2300.00"),
+    ("4700.00", "2000.00"),
+    ("4950.00", "2150.00"),
+)
+
+
+def seed_return_history():
+    if VatRun.objects.filter(kind=VatRun.RETURN, mock=True, batch__isnull=True).count() >= 12:
+        return
+    VatRun.objects.filter(kind=VatRun.RETURN, mock=True, batch__isnull=True).delete()
+    anchor = timezone.localdate().replace(day=1)
+    for index, (t1, t2) in enumerate(_HISTORY):
+        period = shift_month(anchor, -(12 - index))
+        run = VatRun.objects.create(
+            kind=VatRun.RETURN,
+            period_label=period.strftime("%B %Y"),
+            period_date=period,
+            mock=True,
+            payload={"boxes": payment_boxes(t1, t2), "seed": True},
+        )
+        when = timezone.make_aware(datetime.combine(period, time(9, 0)))
+        VatRun.objects.filter(pk=run.pk).update(created=when)
+
+
+def backfill_mock_history():
+    if Invoice.objects.filter(read_source="mock").exists():
+        seed_return_history()
+    missing = (
+        Batch.objects.filter(invoices__read_source="mock")
+        .exclude(runs__kind=VatRun.EXTRACT)
+        .distinct()
+    )
+    for batch in missing:
+        VatRun.objects.create(
+            batch=batch,
+            kind=VatRun.EXTRACT,
+            period_label=batch.period_label,
+            period_date=period_date_from_label(batch.period_label),
+            mock=True,
+            payload={
+                "source": "mock",
+                "line_count": InvoiceLine.objects.filter(invoice__batch=batch).count(),
+                "files": 0,
+            },
+        )
 
 
 def mock_classification(lines):

@@ -1,0 +1,74 @@
+{% extends "items/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}The last year on one desk{% endblock %}
+{% block body %}
+  <p class="lede">Every extract, classification, and VAT3 is kept here. The bars are T1 and T2 for the last twelve months.</p>
+  <div class="stats">
+    <div class="stat"><span class="muted">Extracts</span><strong>{{ counts.extract }}</strong></div>
+    <div class="stat"><span class="muted">Classifications</span><strong>{{ counts.classify }}</strong></div>
+    <div class="stat"><span class="muted">Returns</span><strong>{{ counts.return }}</strong></div>
+  </div>
+
+  {% if latest_boxes.outcome %}
+  <section class="card verdict">
+    <div>
+      {% if latest_boxes.outcome == "payment" %}
+        <p class="kicker">Latest return · payment due</p>
+      {% elif latest_boxes.outcome == "refund" %}
+        <p class="kicker">Latest return · refund due</p>
+      {% else %}
+        <p class="kicker">Latest return · nothing due</p>
+      {% endif %}
+      <p class="due">€{{ latest_boxes.due }}</p>
+      <p class="muted">{{ latest.period_label }}{% if latest.mock %} · mock{% endif %}{% if latest.batch %} · <a href="{% url 'batch_return' latest.batch.pk %}">open the working paper</a>{% endif %}</p>
+    </div>
+    <div>
+      <div class="legend"><span><b class="t1"></b>T1</span><span><b class="t2"></b>T2</span></div>
+      <div class="chart">
+        {% for month in months %}
+        <div class="col" title="{{ month.label }} {{ month.year }} · T1 {{ month.t1 }} · T2 {{ month.t2 }}">
+          <div class="pair">
+            <i class="t1" style="height: {{ month.t1_pct }}%"></i>
+            <i class="t2" style="height: {{ month.t2_pct }}%"></i>
+          </div>
+          <small>{{ month.label }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% else %}
+  <section class="card">
+    <h2>No returns yet</h2>
+    <p class="muted">Runs appear here after you load invoices, classify them, or prepare a return.</p>
+  </section>
+  {% endif %}
+
+  {% if runs %}
+  <h2>Run history</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>When</th><th>Kind</th><th>Period</th><th>Batch</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td class="num">{{ run.created|date:"Y-m-d H:i" }}</td>
+          <td>{{ run.get_kind_display }}</td>
+          <td>{{ run.period_label|default:"—" }}</td>
+          <td>
+            {% if run.batch %}
+              <a href="{% url 'batch_detail' run.batch.pk %}">{{ run.batch.period_label|default:"Batch" }} {{ run.batch.pk }}</a>
+            {% else %}
+              <span class="muted">History</span>
+            {% endif %}
+          </td>
+          <td class="muted">{% if run.mock %}mock{% endif %} {% if run.payload.boxes %}{{ run.payload.boxes.outcome }} €{{ run.payload.boxes.due }}{% elif run.payload.line_count %}{{ run.payload.line_count }} lines{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endblock %}

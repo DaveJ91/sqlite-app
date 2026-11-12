@@ -7,25 +7,25 @@
     <section class="card">
       <h2>Mock batch, no files</h2>
       <p class="muted">Fifty ready-made lines across ten suppliers. Nothing is sent to an API.</p>
-      <form method="post">
+      <form method="post" data-step="load">
         {% csrf_token %}
         <p><input type="text" name="period_label" placeholder="Period, for example March 2026"></p>
         <div class="actions">
-          <button type="submit" name="action" value="mock_batch">Start mock batch</button>
+          <button type="submit" data-wait name="action" value="mock_batch">Start mock batch</button>
         </div>
       </form>
     </section>
     <section class="card">
       <h2>Your own PDFs</h2>
       <p class="muted">Up to 10 files. Read them with the API, or fill sample lines for those filenames.</p>
-      <form method="post" enctype="multipart/form-data">
+      <form method="post" enctype="multipart/form-data" data-step="load">
         {% csrf_token %}
         <p>{{ form.period_label }}</p>
         <p><label>Folder <input type="file" name="files" webkitdirectory directory multiple></label></p>
         <p><label>Or choose files <input type="file" name="files" accept="application/pdf,.pdf" multiple></label></p>
         <div class="actions">
-          <button type="submit" name="action" value="read">Read invoices</button>
-          <button type="submit" class="secondary" name="action" value="mock">Mock these files</button>
+          <button type="submit" data-wait name="action" value="read">Read invoices</button>
+          <button type="submit" data-wait class="secondary" name="action" value="mock">Mock these files</button>
         </div>
         {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
       </form>

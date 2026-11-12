@@ -11,9 +11,10 @@ from langgraph.graph import END, START, StateGraph
 from .classify import classify_lines
 from .httpapi import ClientError
 from .mocks import mock_classification, mock_invoice
-from .models import AuditEvent, Batch, InvoiceLine, VatReturn
+from .models import AuditEvent, Batch, InvoiceLine, VatReturn, VatRun
 from .understanding import understand_invoice
 from .vat import LABELS, RATES, format_amount, parse_amount
+from .vat3 import period_date_from_label, vat3_boxes
 
 
 class GraphState(TypedDict):
@@ -75,6 +76,12 @@ def extract_batch(state: GraphState) -> GraphState:
         )
     batch.status = Batch.EXTRACTED
     batch.save(update_fields=["status"])
+    _record_run(
+        batch,
+        VatRun.EXTRACT,
+        bool(state.get("mock")),
+        {"line_count": InvoiceLine.objects.filter(invoice__batch=batch).count()},
+    )
     return state
 
 
@@ -117,13 +124,20 @@ def classify_batch(state: GraphState) -> GraphState:
         "classified",
         {"line_count": len(lines), "low_confidence_count": low, "mock": bool(state.get("mock"))},
     )
+    _record_run(
+        batch,
+        VatRun.CLASSIFY,
+        bool(state.get("mock")),
+        {"line_count": len(lines), "low_confidence_count": low},
+    )
     return state
 
 
 def prepare_return(state: GraphState) -> GraphState:
     batch = Batch.objects.get(pk=state["batch_id"])
+    lines = list(InvoiceLine.objects.filter(invoice__batch=batch).select_related("invoice"))
     grouped = defaultdict(list)
-    for line in InvoiceLine.objects.filter(invoice__batch=batch).select_related("invoice"):
+    for line in lines:
         grouped[line.category].append(line)
     totals = {}
     for category, rows in grouped.items():
@@ -150,13 +164,20 @@ def prepare_return(state: GraphState) -> GraphState:
                 for row in rows
             ],
         }
+    boxes = vat3_boxes(lines)
     vat_return, _created = VatReturn.objects.update_or_create(
         batch=batch,
-        defaults={"totals": totals},
+        defaults={"totals": totals, "boxes": boxes},
     )
     batch.status = Batch.RETURN_READY
     batch.save(update_fields=["status"])
-    _event(batch, "return_prepared", {"return_id": vat_return.id, "categories": list(totals)})
+    mock = batch.invoices.exists() and not batch.invoices.exclude(read_source="mock").exists()
+    _record_run(batch, VatRun.RETURN, mock, {"boxes": boxes, "categories": list(totals)})
+    _event(
+        batch,
+        "return_prepared",
+        {"return_id": vat_return.id, "categories": list(totals), "outcome": boxes["outcome"], "due": boxes["due"]},
+    )
     return state
 
 
@@ -205,3 +226,14 @@ def _checkpointer():
 
 def _event(batch, kind, payload):
     AuditEvent.objects.create(batch=batch, kind=kind, payload=payload)
+
+
+def _record_run(batch, kind, mock, payload):
+    VatRun.objects.create(
+        batch=batch,
+        kind=kind,
+        period_label=batch.period_label,
+        period_date=period_date_from_label(batch.period_label),
+        mock=mock,
+        payload=payload,
+    )

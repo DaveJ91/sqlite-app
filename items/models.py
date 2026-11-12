@@ -86,4 +86,30 @@ class AuditEvent(models.Model):
 class VatReturn(models.Model):
     batch = models.OneToOneField(Batch, related_name="vat_return", on_delete=models.CASCADE)
     totals = models.JSONField(default=dict, blank=True)
+    boxes = models.JSONField(default=dict, blank=True)
     created = models.DateTimeField(auto_now_add=True)
+
+
+class VatRun(models.Model):
+    EXTRACT = "extract"
+    CLASSIFY = "classify"
+    RETURN = "return"
+    KIND_CHOICES = [
+        (EXTRACT, "Extract"),
+        (CLASSIFY, "Classify"),
+        (RETURN, "Return"),
+    ]
+
+    batch = models.ForeignKey(Batch, related_name="runs", null=True, blank=True, on_delete=models.CASCADE)
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES)
+    created = models.DateTimeField(auto_now_add=True)
+    period_label = models.CharField(max_length=64, blank=True)
+    period_date = models.DateField(null=True, blank=True)
+    mock = models.BooleanField(default=False)
+    payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-period_date", "-created", "-id"]
+
+    def __str__(self):
+        return f"{self.kind} {self.period_label or self.pk}"

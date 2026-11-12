@@ -1,8 +1,66 @@
 {% extends "items/base.html" %}
-{% block title %}VAT return{% endblock %}
-{% block heading %}VAT return workings{% endblock %}
+{% block title %}VAT3 return{% endblock %}
+{% block heading %}Irish VAT3 working paper{% endblock %}
 {% block body %}
-  <p class="lede">Every total opens back to the lines that produced it. This is a working paper, not a filing.</p>
+  <p class="lede">Purchase invoices only, so T1 is reverse-charge VAT. Enter zeros on the form, not the word nil. This page does not file anything with Revenue.</p>
+
+  <section class="card verdict">
+    <div>
+      {% if boxes.outcome == "payment" %}
+        <p class="kicker">Payment due</p>
+      {% elif boxes.outcome == "refund" %}
+        <p class="kicker">Refund due</p>
+      {% else %}
+        <p class="kicker">Nothing payable or repayable</p>
+      {% endif %}
+      <p class="due">€{{ boxes.due }}</p>
+      <p class="muted">T3 is the payment. T4 is the refund. Only one of them is above zero. ROS is due on the 23rd, or the 19th if the return is not filed electronically.</p>
+    </div>
+    <div class="boxgrid">
+      {% for box in box_rows %}
+      <div class="vbox {% if box.hot %}hot{% endif %}">
+        <div class="code">{{ box.code }}</div>
+        <div class="amt">{{ box.amount }}</div>
+        <div class="hint">{{ box.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom: 1rem;">
+    <h2>Last 12 months</h2>
+    <p class="muted">Teal is T1, ink is T2. Compared with {{ prior_count }} earlier return{{ prior_count|pluralize }}{% if mock_priors %}, {{ mock_priors }} of them mock{% endif %}.</p>
+    <div class="legend"><span><b class="t1"></b>T1 sales VAT</span><span><b class="t2"></b>T2 purchase VAT</span></div>
+    <div class="chart">
+      {% for month in months %}
+      <div class="col" title="{{ month.label }} {{ month.year }} · T1 {{ month.t1 }} · T2 {{ month.t2 }}">
+        <div class="pair">
+          <i class="t1" style="height: {{ month.t1_pct }}%"></i>
+          <i class="t2" style="height: {{ month.t2_pct }}%"></i>
+        </div>
+        <small>{{ month.label }}</small>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if flags %}
+  <section class="card anomaly">
+    <h2>Anomalies</h2>
+    <ul>
+      {% for flag in flags %}
+      <li>{{ flag.text }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% elif prior_count < 3 %}
+  <p class="muted">Fewer than three earlier returns, so the 25% check is waiting.</p>
+  {% else %}
+  <p class="muted">No anomaly against the last {{ prior_count }} returns.</p>
+  {% endif %}
+
+  <p class="muted">Reverse-charge notional VAT is posted to T1 and, where it is deductible, to T2. The net of those services goes to ES2. E1, E2, ES1, and PA1 stay at zero: nothing in this batch says goods were moved, services were sold, or an import used postponed accounting.</p>
+
   {% for section in sections %}
   <section class="card" style="margin-bottom: 1rem;">
     <h2>{{ section.label }}</h2>
@@ -29,6 +87,17 @@
     </div>
   </section>
   {% endfor %}
+
+  <h2>Runs</h2>
+  <ul class="batch-list">
+    {% for run in runs %}
+    <li>
+      <span>{{ run.get_kind_display }}{% if run.mock %} · mock{% endif %}</span>
+      <span class="muted">{{ run.created|date:"Y-m-d H:i:s" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+
   <h2>Audit trail</h2>
   <ul class="batch-list">
     {% for event in events %}
@@ -38,4 +107,5 @@
     </li>
     {% endfor %}
   </ul>
+  <p><a class="button secondary" href="{% url 'dashboard' %}">Open the dashboard</a></p>
 {% endblock %}

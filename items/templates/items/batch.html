@@ -6,7 +6,7 @@
   {% for invoice in batch.invoices.all %}
     {% if invoice.error %}<p class="error">{{ invoice.original_name }}: {{ invoice.error }}</p>{% endif %}
   {% endfor %}
-  <form method="post">
+  <form method="post" data-step="classify">
     {% csrf_token %}
     {{ formset.management_form }}
     <div class="table-wrap">
@@ -40,8 +40,8 @@
       {% if blocked %}
         <span class="error">Accept is unavailable until every invoice has been read.</span>
       {% else %}
-        <button type="submit" name="action" value="accept">Accept and classify</button>
-        <button type="submit" class="secondary" name="action" value="mock_vat">Accept with mock VAT</button>
+        <button type="submit" data-wait name="action" value="accept">Accept and classify</button>
+        <button type="submit" data-wait class="secondary" name="action" value="mock_vat">Accept with mock VAT</button>
       {% endif %}
     </div>
     {% else %}

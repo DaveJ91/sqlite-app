@@ -5,9 +5,12 @@ from unittest.mock import patch
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
+from types import SimpleNamespace
+
 from .httpapi import output_text, parse_json_content
-from .models import AuditEvent, Batch, InvoiceLine
+from .models import AuditEvent, Batch, InvoiceLine, VatRun
 from .understanding import understand_invoice
+from .vat3 import anomalies, payment_boxes, vat3_boxes
 
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
 MEDIA = tempfile.mkdtemp()
@@ -123,6 +126,8 @@ class BatchWorkflowTests(TestCase):
         page = self.client.get(f"/batches/{batch.pk}/vat/")
         self.assertContains(page, "Professional services.")
         self.assertContains(page, "0.91")
+        self.assertEqual(batch.runs.filter(kind="classify").count(), 1)
+        self.assertEqual(batch.runs.filter(kind="extract").count(), 1)
 
     def test_low_confidence_is_highlighted(self):
         batch = Batch.objects.create(status=Batch.CLASSIFIED)
@@ -165,6 +170,13 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(page, "Consulting")
         self.assertContains(page, "Heat")
         self.assertContains(page, "return_prepared")
+        self.assertContains(page, "Refund due")
+        self.assertContains(page, "28.40")
+        self.assertEqual(batch.vat_return.boxes["T1"], "0.00")
+        self.assertEqual(batch.vat_return.boxes["T2"], "28.40")
+        self.assertEqual(batch.vat_return.boxes["T3"], "0.00")
+        self.assertEqual(batch.vat_return.boxes["T4"], "28.40")
+        self.assertEqual(batch.runs.filter(kind="return").count(), 1)
 
     def test_mock_batch_needs_no_files(self):
         response = self.client.post("/", {"action": "mock_batch", "period_label": "March 2026"})
@@ -219,6 +231,135 @@ def _two_line_post(first, second, action):
     for field in ["supplier", "invoice_number", "invoice_date", "currency", "description", "net_amount", "vat_amount", "gross_amount"]:
         payload[f"form-1-{field}"] = getattr(second, field)
     return payload
+
+
+class Vat3Tests(TestCase):
+    def test_reverse_charge_posts_t1_t2_and_es2(self):
+        shown = SimpleNamespace(category="reverse_charge", net_amount="100.00", vat_amount="23.00")
+        boxes = vat3_boxes([shown])
+        self.assertEqual(boxes["T1"], "23.00")
+        self.assertEqual(boxes["T2"], "23.00")
+        self.assertEqual(boxes["T3"], "0.00")
+        self.assertEqual(boxes["T4"], "0.00")
+        self.assertEqual(boxes["ES2"], "100.00")
+        self.assertEqual(boxes["E1"], "0.00")
+        self.assertEqual(boxes["E2"], "0.00")
+        self.assertEqual(boxes["ES1"], "0.00")
+        self.assertEqual(boxes["PA1"], "0.00")
+        self.assertEqual(boxes["outcome"], "clear")
+        blank = SimpleNamespace(category="reverse_charge", net_amount="200.00", vat_amount="")
+        boxes = vat3_boxes([blank])
+        self.assertEqual(boxes["T1"], "46.00")
+        self.assertEqual(boxes["ES2"], "200.00")
+
+    def test_exempt_zero_and_outside_scope_do_not_enter_t2(self):
+        lines = [
+            SimpleNamespace(category="exempt", net_amount="50.00", vat_amount="10.00"),
+            SimpleNamespace(category="zero", net_amount="80.00", vat_amount="0.00"),
+            SimpleNamespace(category="outside_scope", net_amount="90.00", vat_amount="20.00"),
+        ]
+        boxes = vat3_boxes(lines)
+        self.assertEqual(boxes["T1"], "0.00")
+        self.assertEqual(boxes["T2"], "0.00")
+        self.assertEqual(boxes["outcome"], "clear")
+
+    def test_history_flags_a_purchase_refund(self):
+        from .mocks import seed_return_history
+
+        seed_return_history()
+        priors = [
+            run.payload["boxes"]
+            for run in VatRun.objects.filter(kind="return", batch__isnull=True).order_by("-period_date", "-created")
+        ]
+        self.assertEqual(len(priors), 12)
+        current = vat3_boxes(
+            [
+                SimpleNamespace(category="standard", net_amount="100.00", vat_amount="23.00"),
+                SimpleNamespace(category="reduced", net_amount="40.00", vat_amount="5.40"),
+            ]
+        )
+        text = " ".join(flag["text"] for flag in anomalies(current, priors))
+        self.assertIn("more than 25%", text)
+        self.assertIn("This return is a refund. The previous return was a payment.", text)
+
+        batch = Batch.objects.create(status=Batch.CLASSIFIED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
+        invoice.lines.create(description="Consulting", net_amount="100.00", vat_amount="23.00", gross_amount="123.00", category="standard", rate="23%", confidence=0.95, reason="Services")
+        invoice.lines.create(description="Heat", net_amount="40.00", vat_amount="5.40", gross_amount="45.40", category="reduced", rate="13.5%", confidence=0.88, reason="Fuel")
+        first, second = invoice.lines.order_by("id")
+        response = self.client.post(
+            f"/batches/{batch.pk}/vat/",
+            {
+                "action": "accept",
+                "form-TOTAL_FORMS": "2",
+                "form-INITIAL_FORMS": "2",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-id": str(first.id),
+                "form-0-category": "standard",
+                "form-1-id": str(second.id),
+                "form-1-category": "reduced",
+            },
+        )
+        self.assertRedirects(response, f"/batches/{batch.pk}/return/")
+        page = self.client.get(f"/batches/{batch.pk}/return/")
+        self.assertContains(page, "Anomalies")
+        self.assertContains(page, "Refund due")
+        self.assertContains(page, "more than 25%")
+        self.assertContains(page, "ES2")
+        self.assertContains(page, "PA1")
+
+    def test_new_eu_box_is_flagged_only_with_three_priors(self):
+        refund = vat3_boxes([SimpleNamespace(category="standard", net_amount="100.00", vat_amount="23.00")])
+        one = anomalies(refund, [payment_boxes("100.00", "40.00")])
+        self.assertTrue(any(flag["code"] == "outcome" for flag in one))
+        self.assertFalse(any("25%" in flag["text"] for flag in one))
+        current = vat3_boxes([SimpleNamespace(category="reverse_charge", net_amount="100.00", vat_amount="23.00")])
+        flagged = anomalies(current, [payment_boxes("4800.00", "2100.00") for _ in range(3)])
+        self.assertTrue(any(flag["code"] == "ES2" for flag in flagged))
+
+    def test_dashboard_shows_the_seeded_year(self):
+        from .mocks import seed_return_history
+
+        seed_return_history()
+        page = self.client.get("/dashboard/")
+        self.assertContains(page, "Latest return · payment due")
+        self.assertContains(page, "Run history")
+        self.assertContains(page, "mock")
+        self.assertEqual(page.content.decode().count('class="col"'), 12)
+
+
+class LoaderTests(TestCase):
+    def test_step_changes_wait_and_save_does_not(self):
+        home = self.client.get("/")
+        html = home.content.decode()
+        self.assertIn('data-step="load"', html)
+        self.assertIn("WAIT_MS = 5000", html)
+        self.assertIn("data-wait", _button(html, "mock_batch"))
+        self.assertIn("data-wait", _button(html, "read"))
+        self.assertIn("data-wait", _button(html, "mock"))
+        self.assertIn('!submitter.hasAttribute("data-wait")', html)
+
+        batch = Batch.objects.create(status=Batch.EXTRACTED, period_label="March 2026")
+        invoice = batch.invoices.create(original_name="a.pdf", file=pdf_upload("a.pdf"))
+        invoice.lines.create(description="Consulting", net_amount="100.00", vat_amount="23.00", gross_amount="123.00")
+        review = self.client.get(f"/batches/{batch.pk}/").content.decode()
+        self.assertIn('data-step="classify"', review)
+        self.assertNotIn("data-wait", _button(review, "save"))
+        self.assertIn("data-wait", _button(review, "accept"))
+        self.assertIn("data-wait", _button(review, "mock_vat"))
+
+        batch.status = Batch.CLASSIFIED
+        batch.save(update_fields=["status"])
+        invoice.lines.update(category="standard", confidence=0.95)
+        vat = self.client.get(f"/batches/{batch.pk}/vat/").content.decode()
+        self.assertIn('data-step="return"', vat)
+        self.assertNotIn("data-wait", _button(vat, "save"))
+        self.assertIn("data-wait", _button(vat, "accept"))
+
+
+def _button(html, value):
+    return html.split(f'value="{value}"')[0].rsplit("<button", 1)[-1]
 
 
 class ReaderFallbackTests(TestCase):

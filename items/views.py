@@ -7,10 +7,11 @@ from .httpapi import ClientError
 
 from .forms import ClassificationFormSet, LineFormSet, UploadForm
 from .graph import run_step
-from .mocks import seed_mock_batch
-from .models import AuditEvent, Batch, Invoice, InvoiceLine
+from .mocks import backfill_mock_history, seed_mock_batch
+from .models import AuditEvent, Batch, Invoice, InvoiceLine, VatRun
 from .plan import workspace_plan
 from .vat import RATES
+from .vat3 import anomalies, box_rows, chart_months, period_date_from_label, vat3_boxes
 
 
 def batch_list(request):
@@ -114,6 +115,14 @@ def batch_return(request, pk):
     sections = []
     for category, section in batch.vat_return.totals.items():
         sections.append(section)
+    boxes = batch.vat_return.boxes or {}
+    if "T1" not in boxes:
+        boxes = vat3_boxes(_lines(batch))
+    priors = _prior_returns(batch)
+    prior_boxes = [(run.payload or {}).get("boxes") or {} for run in priors]
+    flags = anomalies(boxes, prior_boxes)
+    points = [(run.period_date, (run.payload or {}).get("boxes") or {}) for run in reversed(priors)]
+    points.append((period_date_from_label(batch.period_label), boxes))
     return render(
         request,
         "items/return.html",
@@ -122,12 +131,53 @@ def batch_return(request, pk):
             "sections": sections,
             "events": batch.events.all(),
             "plan": workspace_plan(batch),
+            "boxes": boxes,
+            "box_rows": box_rows(boxes),
+            "flags": flags,
+            "prior_count": len(prior_boxes),
+            "mock_priors": sum(1 for run in priors if run.mock),
+            "months": chart_months(points),
+            "runs": batch.runs.all(),
+        },
+    )
+
+
+def dashboard(request):
+    backfill_mock_history()
+    runs = VatRun.objects.select_related("batch")[:40]
+    returns = list(VatRun.objects.filter(kind=VatRun.RETURN).order_by("-period_date", "-created")[:12])
+    points = [(run.period_date, (run.payload or {}).get("boxes") or {}) for run in reversed(returns)]
+    latest = VatRun.objects.filter(kind=VatRun.RETURN).order_by("-created").first()
+    latest_boxes = (latest.payload or {}).get("boxes") if latest else None
+    return render(
+        request,
+        "items/dashboard.html",
+        {
+            "batch": None,
+            "plan": workspace_plan(None, dashboard=True),
+            "runs": runs,
+            "months": chart_months(points),
+            "latest": latest,
+            "latest_boxes": latest_boxes or {},
+            "counts": {
+                "extract": VatRun.objects.filter(kind=VatRun.EXTRACT).count(),
+                "classify": VatRun.objects.filter(kind=VatRun.CLASSIFY).count(),
+                "return": VatRun.objects.filter(kind=VatRun.RETURN).count(),
+            },
         },
     )
 
 
 def _lines(batch):
     return InvoiceLine.objects.filter(invoice__batch=batch).select_related("invoice")
+
+
+def _prior_returns(batch):
+    if batch.invoices.filter(read_source="mock").exists():
+        backfill_mock_history()
+    return list(
+        VatRun.objects.filter(kind=VatRun.RETURN).exclude(batch=batch).order_by("-period_date", "-created")[:12]
+    )
 
 
 def _extraction_blocked(batch, lines):
