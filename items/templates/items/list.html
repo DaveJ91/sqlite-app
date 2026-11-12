@@ -2,7 +2,7 @@
 {% block title %}Invoices{% endblock %}
 {% block body %}
   <h1>Invoice batches</h1>
-  <p class="muted">Upload a folder of up to 10 PDFs. If no content-understanding URL is set, Grok reads the invoices.</p>
+  <p class="muted">Upload a folder of up to 10 PDFs. Read invoices calls the API. Use mock extraction skips that call and fills sample invoice lines.</p>
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <p>{{ form.period_label }}</p>
@@ -12,7 +12,8 @@
     <p>
       <label>Or choose files <input type="file" name="files" accept="application/pdf,.pdf" multiple></label>
     </p>
-    <button type="submit">Read invoices</button>
+    <button type="submit" name="action" value="read">Read invoices</button>
+    <button type="submit" name="action" value="mock">Use mock extraction</button>
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
   </form>
   {% if batches %}

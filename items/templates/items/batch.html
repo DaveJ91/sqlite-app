@@ -42,7 +42,8 @@
       {% if blocked %}
         <span class="error">Accept is unavailable until every invoice has been read.</span>
       {% else %}
-        <button type="submit" name="action" value="accept">Accept</button>
+        <button type="submit" name="action" value="accept">Accept and classify</button>
+        <button type="submit" name="action" value="mock_vat">Accept with mock VAT</button>
       {% endif %}
     </div>
     {% else %}

@@ -166,6 +166,38 @@ class BatchWorkflowTests(TestCase):
         self.assertContains(page, "Heat")
         self.assertContains(page, "return_prepared")
 
+    @patch("items.graph.understand_invoice", side_effect=AssertionError("api"))
+    def test_mock_extraction_skips_the_api(self, understand):
+        response = self.client.post("/", {"files": [pdf_upload("a.pdf")], "action": "mock"})
+        batch = Batch.objects.get()
+        self.assertRedirects(response, f"/batches/{batch.pk}/")
+        understand.assert_not_called()
+        line = InvoiceLine.objects.get(description="Management consulting")
+        self.assertEqual(line.supplier, "Harbour Consulting Ltd")
+        self.assertEqual(line.invoice.read_source, "mock")
+
+    @patch("items.graph.classify_lines", side_effect=AssertionError("api"))
+    @patch("items.graph.understand_invoice", side_effect=lambda path, filename: (EXTRACTED, "grok"))
+    def test_mock_vat_assigns_a_random_category(self, _understand, classify):
+        self.client.post("/", {"files": [pdf_upload("a.pdf")]})
+        line = InvoiceLine.objects.get()
+        with patch("items.mocks.random.choice", return_value="reduced"), patch(
+            "items.mocks.random.uniform", return_value=0.42
+        ):
+            response = self.client.post(
+                f"/batches/{line.invoice.batch_id}/",
+                line_post(line, action="mock_vat"),
+            )
+        classify.assert_not_called()
+        line.refresh_from_db()
+        self.assertRedirects(response, f"/batches/{line.invoice.batch_id}/vat/")
+        self.assertEqual(line.category, "reduced")
+        self.assertEqual(line.rate, "13.5%")
+        self.assertEqual(line.confidence, 0.42)
+        self.assertEqual(line.reason, "Mock classification.")
+        page = self.client.get(f"/batches/{line.invoice.batch_id}/vat/")
+        self.assertContains(page, "Low confidence")
+
 
 def _two_line_post(first, second, action):
     payload = line_post(first, action=action)

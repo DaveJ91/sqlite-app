@@ -20,7 +20,7 @@ def batch_list(request):
             for upload in request.FILES.getlist("files"):
                 upload.name = Path(upload.name).name
                 Invoice.objects.create(batch=batch, file=upload, original_name=upload.name)
-            run_step(batch.id, "extract")
+            run_step(batch.id, "extract", mock=request.POST.get("action") == "mock")
             return redirect("batch_detail", pk=batch.pk)
     return render(request, "items/list.html", {"batches": Batch.objects.all(), "form": form})
 
@@ -34,12 +34,16 @@ def batch_detail(request, pk):
         action = request.POST.get("action")
         if formset.is_valid():
             _save_line_edits(batch, formset, "edited")
-            if action == "accept" and not _extraction_blocked(batch, _lines(batch)):
-                AuditEvent.objects.create(batch=batch, kind="extraction_accepted", payload={})
+            if action in ("accept", "mock_vat") and not _extraction_blocked(batch, _lines(batch)):
+                AuditEvent.objects.create(
+                    batch=batch,
+                    kind="extraction_accepted",
+                    payload={"mock": action == "mock_vat"},
+                )
                 batch.status = Batch.EXTRACTION_ACCEPTED
                 batch.save(update_fields=["status"])
                 try:
-                    run_step(batch.id, "classify")
+                    run_step(batch.id, "classify", mock=action == "mock_vat")
                 except ClientError as exc:
                     batch.status = Batch.EXTRACTED
                     batch.save(update_fields=["status"])

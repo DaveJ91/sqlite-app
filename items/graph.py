@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .classify import classify_lines
 from .httpapi import ClientError
+from .mocks import mock_classification, mock_invoice
 from .models import AuditEvent, Batch, InvoiceLine, VatReturn
 from .understanding import understand_invoice
 from .vat import LABELS, RATES, format_amount, parse_amount
@@ -18,14 +19,18 @@ from .vat import LABELS, RATES, format_amount, parse_amount
 class GraphState(TypedDict):
     batch_id: int
     step: str
+    mock: bool
 
 
 def extract_batch(state: GraphState) -> GraphState:
     batch = Batch.objects.get(pk=state["batch_id"])
-    for invoice in batch.invoices.all():
+    for index, invoice in enumerate(batch.invoices.all()):
         invoice.lines.all().delete()
         try:
-            data, source = understand_invoice(invoice.file.path, invoice.original_name)
+            if state.get("mock"):
+                data, source = mock_invoice(index), "mock"
+            else:
+                data, source = understand_invoice(invoice.file.path, invoice.original_name)
         except Exception as exc:
             invoice.error = str(exc) if isinstance(exc, ClientError) else "Could not read this invoice."
             invoice.raw_response = {}
@@ -76,7 +81,10 @@ def extract_batch(state: GraphState) -> GraphState:
 def classify_batch(state: GraphState) -> GraphState:
     batch = Batch.objects.get(pk=state["batch_id"])
     lines = list(InvoiceLine.objects.filter(invoice__batch=batch))
-    classified = classify_lines(lines)
+    if state.get("mock"):
+        classified = mock_classification(lines)
+    else:
+        classified = classify_lines(lines)
     by_id = {row["line_id"]: row for row in classified}
     low = 0
     for line in lines:
@@ -104,7 +112,11 @@ def classify_batch(state: GraphState) -> GraphState:
         line.save()
     batch.status = Batch.CLASSIFIED
     batch.save(update_fields=["status"])
-    _event(batch, "classified", {"line_count": len(lines), "low_confidence_count": low})
+    _event(
+        batch,
+        "classified",
+        {"line_count": len(lines), "low_confidence_count": low, "mock": bool(state.get("mock"))},
+    )
     return state
 
 
@@ -148,12 +160,12 @@ def prepare_return(state: GraphState) -> GraphState:
     return state
 
 
-def run_step(batch_id, step):
+def run_step(batch_id, step, mock=False):
     checkpointer, conn = _checkpointer()
     try:
         graph = _compile(checkpointer)
         graph.invoke(
-            {"batch_id": batch_id, "step": step},
+            {"batch_id": batch_id, "step": step, "mock": mock},
             {"configurable": {"thread_id": f"batch-{batch_id}-{step}"}},
         )
     finally:
