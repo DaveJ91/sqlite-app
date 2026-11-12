@@ -36,3 +36,13 @@ Write, with the same gates as the pages:
 Also expose the batch JSON and the training catalogue as resources, and a `review_batch` prompt that stops before sign-off.
 
 Ship the read tools, `preview_return`, `lookup_treatment`, and `start_mock_batch` first. The desk already calls `items/agent_tools.py`. The MCP server should wrap that module rather than a second copy.
+
+### 2. Invoice beside the classification review
+
+The VAT review shows the filename and not the page. Open the stored PDF next to the line being reviewed, and keep it on that invoice as you move down the table. A mock line has no file, so say so.
+
+### 3. Legislation and Revenue guidance on the review
+
+From a chain step, open the provision and the Revenue note that step is using, without leaving the review.
+
+Classification: is there a supply, good or service, place of supply, rate, and who accounts. Deductibility: VATCA 2010 s.59 (deduction), s.60 (blocked inputs), s.61 (apportionment), and s.62 (qualifying cars). The panel cites the source. The page stays a working paper.
